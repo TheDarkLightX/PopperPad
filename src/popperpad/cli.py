@@ -15,6 +15,18 @@ def _read_json(path: str) -> Any:
         return json.loads(sys.stdin.read())
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
+def _read_bytes(path: str) -> bytes:
+    if path == "-":
+        return sys.stdin.buffer.read()
+    return Path(path).read_bytes()
+
+
+def _write_bytes(path: str, data: bytes) -> None:
+    if path == "-":
+        sys.stdout.buffer.write(data)
+        return
+    Path(path).write_bytes(data)
+
 
 def _print(obj: Any) -> None:
     sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2) + "\n")
@@ -29,6 +41,14 @@ def main(argv: list[str] | None = None) -> int:
 
     s_add = sub.add_parser("add", help="Add a JSON object to CAS + log")
     s_add.add_argument("--json", required=True, help="Path to object JSON (or '-' for stdin)")
+
+    s_bput = sub.add_parser("blob-put", help="Add a blob (bytes) to CAS + log")
+    s_bput.add_argument("--path", required=True, help="Path to bytes (or '-' for stdin)")
+    s_bput.add_argument("--media-type", default="application/octet-stream")
+
+    s_bget = sub.add_parser("blob-get", help="Fetch a blob from CAS")
+    s_bget.add_argument("blob_ref", help="Blob ref (sha256:<64hex>)")
+    s_bget.add_argument("--out", required=True, help="Output path (or '-' for stdout)")
 
     s_prove = sub.add_parser("prove", help="Run support recipes for a hypothesis (emit evidence + supports edges)")
     s_prove.add_argument("hypothesis_ref", help="Hypothesis ref (sha256:<64hex>)")
@@ -72,6 +92,27 @@ def main(argv: list[str] | None = None) -> int:
         validate_object(obj)
         rep = pad.put_object(obj)
         _print({"ok": True, "obj_ref": rep.obj_ref, "record_hash": rep.record_hash})
+        return 0
+
+    if ns.cmd == "blob-put":
+        data = _read_bytes(str(ns.path))
+        rep = pad.put_blob(data, media_type=str(ns.media_type))
+        _print(
+            {
+                "ok": True,
+                "blob_ref": rep.obj_ref,
+                "record_hash": rep.record_hash,
+                "bytes": len(data),
+                "media_type": str(ns.media_type),
+            }
+        )
+        return 0
+
+    if ns.cmd == "blob-get":
+        data = pad.get_blob(str(ns.blob_ref))
+        _write_bytes(str(ns.out), data)
+        if str(ns.out) != "-":
+            _print({"ok": True, "blob_ref": str(ns.blob_ref), "bytes": len(data), "out": str(Path(ns.out).resolve())})
         return 0
 
     if ns.cmd == "prove":
@@ -142,4 +183,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

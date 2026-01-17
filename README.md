@@ -29,6 +29,11 @@ Install (editable):
 pip install -e .[dev]
 ```
 
+Codex skills (optional):
+
+- Skill folders live under `skills/` (`popperpad-core`, `popperpad-formal-tools`).
+- Install by copying/symlinking into `$CODEX_HOME/skills/` (or your agent framework’s skills directory).
+
 Create a pad:
 
 ```bash
@@ -55,6 +60,13 @@ Inspect:
 popperpad status  --pad ./pad <hypothesis_ref> --context <context_ref>
 popperpad doctor  --pad ./pad
 popperpad checkpoint --pad ./pad
+```
+
+Blobs (large artifacts):
+
+```bash
+popperpad blob-put --pad ./pad --path ./artifact.bin --media-type application/octet-stream
+popperpad blob-get --pad ./pad sha256:... --out ./artifact.bin
 ```
 
 Transfer:

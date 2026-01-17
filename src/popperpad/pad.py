@@ -92,9 +92,26 @@ class PopperPad:
         ).record_hash
         return AddResult(obj_ref=put.ref, record_hash=record_hash)
 
+    def put_blob(self, data: bytes, *, media_type: str = "application/octet-stream") -> AddResult:
+        put = self.cas.put_bytes(bytes(data))
+        record_hash = self.log.append(
+            {
+                "schema": "popperpad/log_record/v1",
+                "op": "add_blob",
+                "created_at": utc_now_iso(),
+                "blob_ref": put.ref,
+                "media_type": str(media_type),
+            }
+        ).record_hash
+        return AddResult(obj_ref=put.ref, record_hash=record_hash)
+
     def get_object(self, ref: str) -> Any:
         _require(_is_ref(ref), "invalid ref")
         return self.cas.get_json(ref)
+
+    def get_blob(self, ref: str) -> bytes:
+        _require(_is_ref(ref), "invalid ref")
+        return self.cas.get_bytes(ref)
 
     def _iter_objects_by_schema(self, schema: str) -> Iterable[tuple[str, Mapping[str, Any]]]:
         for rec in self.log.iter_records():
@@ -353,24 +370,41 @@ class PopperPad:
         except Exception as e:
             issues.append({"kind": "log", "error": f"{type(e).__name__}: {e}"})
 
-        # Validate that every add_object record references a valid object.
+        # Validate that every add_object/add_blob record references valid CAS content.
         objects = 0
+        blobs = 0
         for i, rec in enumerate(self.log.iter_records()):
-            if rec.get("op") != "add_object":
-                continue
-            objects += 1
-            obj_ref = rec.get("obj_ref")
-            if not _is_ref(obj_ref):
-                issues.append({"kind": "record", "line": i + 1, "error": "invalid obj_ref"})
-                continue
-            try:
-                obj = self.cas.get_json(str(obj_ref))
-                validate_object(obj)
-            except Exception as e:
-                issues.append({"kind": "object", "ref": str(obj_ref), "error": f"{type(e).__name__}: {e}"})
+            op = rec.get("op")
+            if op == "add_object":
+                objects += 1
+                obj_ref = rec.get("obj_ref")
+                if not _is_ref(obj_ref):
+                    issues.append({"kind": "record", "line": i + 1, "error": "invalid obj_ref"})
+                    continue
+                try:
+                    obj = self.cas.get_json(str(obj_ref))
+                    validate_object(obj)
+                except Exception as e:
+                    issues.append({"kind": "object", "ref": str(obj_ref), "error": f"{type(e).__name__}: {e}"})
+            elif op == "add_blob":
+                blobs += 1
+                blob_ref = rec.get("blob_ref")
+                if not _is_ref(blob_ref):
+                    issues.append({"kind": "record", "line": i + 1, "error": "invalid blob_ref"})
+                    continue
+                media_type = rec.get("media_type")
+                if media_type is not None and not isinstance(media_type, str):
+                    issues.append({"kind": "record", "line": i + 1, "error": "invalid media_type"})
+                try:
+                    self.cas.get_bytes(str(blob_ref))
+                except Exception as e:
+                    issues.append({"kind": "blob", "ref": str(blob_ref), "error": f"{type(e).__name__}: {e}"})
 
-        rep = DoctorReport(ok=len(issues) == 0, issues=issues, stats={"objects": objects, **self.log.stats()})
+        rep = DoctorReport(
+            ok=len(issues) == 0,
+            issues=issues,
+            stats={"objects": objects, "blobs": blobs, **self.log.stats()},
+        )
         if strict and not rep.ok:
             raise ValueError(json.dumps(rep.__dict__, sort_keys=True, indent=2))
         return rep
-

@@ -10,6 +10,8 @@ def test_cas_and_log_and_doctor() -> None:
     with tempfile.TemporaryDirectory() as td:
         pad = PopperPad(root=Path(td) / "pad")
         pad.init()
+        rep = pad.put_blob(b"hello", media_type="text/plain")
+        assert pad.get_blob(rep.obj_ref) == b"hello"
         pad.doctor(strict=True)
 
 
@@ -85,4 +87,3 @@ def test_prove_refute_status_and_transfer_paths() -> None:
         assert st2.state == "disputed"
 
         pad.doctor(strict=True)
-
