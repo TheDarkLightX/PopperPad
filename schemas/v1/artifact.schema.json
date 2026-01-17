@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/artifact/v1",
+  "type": "object",
+  "required": ["schema", "name", "kind", "media_type", "blob_ref"],
+  "properties": {
+    "schema": { "const": "popperpad/artifact/v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "minLength": 1 },
+    "media_type": { "type": "string", "minLength": 1 },
+    "blob_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": true
+}
+

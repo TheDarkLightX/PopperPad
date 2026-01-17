@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/edge/v1",
+  "type": "object",
+  "required": ["schema", "edge_type", "from_ref", "to_ref", "evidence_refs"],
+  "properties": {
+    "schema": { "const": "popperpad/edge/v1" },
+    "edge_type": {
+      "type": "string",
+      "enum": ["supports", "refutes", "supersedes", "depends_on", "topic", "semantic"]
+    },
+    "from_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "to_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "context_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "tag": { "type": "string", "enum": ["≅", "↦", "⊑", "⊒", "~"] },
+    "obligations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["obligation_id", "recipe_ref"],
+        "properties": {
+          "obligation_id": { "type": "string" },
+          "recipe_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "evidence_refs": { "type": "array", "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } }
+  },
+  "additionalProperties": true
+}
+

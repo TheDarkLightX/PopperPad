@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/domain/v1",
+  "type": "object",
+  "required": ["schema", "domain_id", "name"],
+  "properties": {
+    "schema": { "const": "popperpad/domain/v1" },
+    "domain_id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "tags": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}
+

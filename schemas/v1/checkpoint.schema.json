@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/checkpoint/v1",
+  "type": "object",
+  "required": ["schema", "created_at", "log_head", "event_count"],
+  "properties": {
+    "schema": { "const": "popperpad/checkpoint/v1" },
+    "created_at": { "type": "string" },
+    "log_head": { "type": "string" },
+    "event_count": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}
+

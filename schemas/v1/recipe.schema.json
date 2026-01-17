@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/recipe/v1",
+  "type": "object",
+  "required": ["schema", "argv"],
+  "properties": {
+    "schema": { "const": "popperpad/recipe/v1" },
+    "recipe_id": { "type": "string" },
+    "verdict_on_pass": { "type": "string", "enum": ["support", "refute", "neutral"] },
+    "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "env": { "type": "object", "additionalProperties": { "type": ["string", "null"] } },
+    "requires": { "type": "array", "items": { "type": "string" } },
+    "requires_paths": { "type": "array", "items": { "type": "string" } },
+    "timeout_ms": { "type": "integer", "minimum": 1 },
+    "max_output_bytes": { "type": "integer", "minimum": 1 },
+    "expect": {
+      "type": "object",
+      "properties": {
+        "exit_code": { "type": "integer" },
+        "stdout_contains": { "type": "string" },
+        "stderr_contains": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "text": { "type": "string" },
+          "binding": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "capture_paths": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}
+

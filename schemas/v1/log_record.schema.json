@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/log_record/v1",
+  "type": "object",
+  "required": ["schema", "op", "created_at", "prev_record_hash", "record_hash"],
+  "properties": {
+    "schema": { "const": "popperpad/log_record/v1" },
+    "op": { "type": "string" },
+    "created_at": { "type": "string" },
+    "prev_record_hash": { "type": "string" },
+    "record_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "obj_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "obj_schema": { "type": "string" }
+  },
+  "additionalProperties": true
+}
+

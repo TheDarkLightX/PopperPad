@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/evidence/v1",
+  "type": "object",
+  "required": ["schema", "evidence_kind", "recipe_ref", "subject_refs", "result"],
+  "properties": {
+    "schema": { "const": "popperpad/evidence/v1" },
+    "evidence_kind": { "type": "string" },
+    "created_at": { "type": "string" },
+    "recipe_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "context_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "subject_refs": { "type": "array", "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } },
+    "result": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string" },
+        "exit_code": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "reason": { "type": "string" },
+    "stdout_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "stderr_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "ref"],
+        "properties": {
+          "name": { "type": "string" },
+          "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
+
