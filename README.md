@@ -21,6 +21,16 @@ It is designed to be:
 - “Supported / falsified / disputed” is computed from evidence (and optional `refutes` edges), not written as truth.
 - Cross-domain transfer is represented by first-class **semantic edges** tagged with `≅/↦/⊑/⊒/~` plus explicit proof/check obligations.
 
+## Recipe capabilities (v1)
+
+`popperpad/recipe/v1` supports:
+- Tool-optional execution via `requires` / `requires_paths` (missing tools ⇒ `SKIP` evidence).
+- Input materialization via `files` and optional `stdin` (`ref`/`text`/`binding`).
+- Expectations beyond exit codes: `stdout_contains`, `stderr_contains`, `*_not_contains`, `*_regex`, `files_exist`, `files_not_exist`.
+- Artifact capture via `capture_paths` and named `artifacts` (per-artifact `max_bytes`, plus `max_capture_bytes` default).
+
+Evidence records include captured blob refs plus run metadata (argv, duration, toolchain hashes, truncation flags).
+
 ## CLI (MVP)
 
 Install (editable):

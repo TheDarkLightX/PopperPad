@@ -22,6 +22,27 @@
     "reason": { "type": "string" },
     "stdout_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "stderr_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "argv": { "type": "array", "items": { "type": "string" } },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "stdout_truncated": { "type": "boolean" },
+    "stderr_truncated": { "type": "boolean" },
+    "toolchain": {
+      "type": "object",
+      "properties": {
+        "executables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "outputs": {
       "type": "array",
       "items": {
@@ -37,4 +58,3 @@
   },
   "additionalProperties": true
 }
-

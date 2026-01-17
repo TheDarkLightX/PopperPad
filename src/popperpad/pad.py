@@ -12,6 +12,8 @@ from .runner import run_recipe
 from .schemas import (
     SCHEMA_ARTIFACT_V1,
     SCHEMA_CHECKPOINT_V1,
+    SCHEMA_CONTEXT_V1,
+    SCHEMA_DOMAIN_V1,
     SCHEMA_EDGE_V1,
     SCHEMA_EVIDENCE_V1,
     SCHEMA_HYPOTHESIS_V1,
@@ -147,6 +149,7 @@ class PopperPad:
         any_skip = False
         any_fail = False
         any_pass = False
+        any_inconclusive = False
 
         for rref in recipe_refs:
             if not _is_ref(rref):
@@ -161,8 +164,9 @@ class PopperPad:
                 continue
 
             res = run_recipe(cas=self.cas, recipe=recipe, bindings={}, repo_root=None)
-            if res.status == "SKIP":
+            if res.status in {"SKIP", "TIMEOUT", "ERROR"}:
                 any_skip = True
+                any_inconclusive = True
             elif res.status == "FAIL":
                 any_fail = True
             elif res.status == "PASS":
@@ -177,10 +181,17 @@ class PopperPad:
                 "subject_refs": [hyp_ref],
                 "result": {"status": res.status.lower(), "exit_code": res.exit_code},
                 "reason": res.reason,
-                "stdout_ref": res.stdout_ref,
-                "stderr_ref": res.stderr_ref,
-                "outputs": [{"name": o["name"], "ref": o["ref"]} for o in res.outputs],
+                "toolchain": res.toolchain,
+                "duration_ms": res.duration_ms,
+                "argv": list(res.argv),
+                "stdout_truncated": bool(res.stdout_truncated),
+                "stderr_truncated": bool(res.stderr_truncated),
+                "outputs": list(res.outputs),
             }
+            if res.stdout_ref:
+                ev_obj["stdout_ref"] = res.stdout_ref
+            if res.stderr_ref:
+                ev_obj["stderr_ref"] = res.stderr_ref
             ev_ref = self.put_object(ev_obj).obj_ref
             evidence_refs.append(ev_ref)
 
@@ -224,14 +235,18 @@ class PopperPad:
             return RunResult(ok=False, verdict="INCONCLUSIVE", evidence_refs=[], edge_refs=[])
 
         verdict = "INCONCLUSIVE"
-        ok = False
-        if any_skip:
+        if any_fail:
+            verdict = "FAIL"
+        elif any_inconclusive:
             verdict = "INCONCLUSIVE"
-        elif mode == "prove":
-            verdict = "PASS" if (any_pass and not any_fail) else "FAIL"
+        elif any_pass:
+            verdict = "PASS"
         else:
-            # refute: PASS means at least one refuter recipe succeeded
-            verdict = "PASS" if any_pass else "FAIL"
+            verdict = "INCONCLUSIVE"
+
+        if mode == "refute":
+            verdict = "PASS" if any_pass else ("INCONCLUSIVE" if any_inconclusive else "FAIL")
+
         ok = verdict == "PASS"
         return RunResult(ok=ok, verdict=verdict, evidence_refs=evidence_refs, edge_refs=edge_refs)
 
@@ -370,9 +385,14 @@ class PopperPad:
         except Exception as e:
             issues.append({"kind": "log", "error": f"{type(e).__name__}: {e}"})
 
-        # Validate that every add_object/add_blob record references valid CAS content.
+        # Validate that every add_object/add_blob record references valid CAS content,
+        # and perform best-effort graph integrity checks over common ref fields.
         objects = 0
         blobs = 0
+        schema_by_ref: dict[str, str] = {}
+        obj_by_ref: dict[str, Mapping[str, Any]] = {}
+        schema_counts: dict[str, int] = {}
+
         for i, rec in enumerate(self.log.iter_records()):
             op = rec.get("op")
             if op == "add_object":
@@ -384,6 +404,11 @@ class PopperPad:
                 try:
                     obj = self.cas.get_json(str(obj_ref))
                     validate_object(obj)
+                    if isinstance(obj, Mapping):
+                        schema = str(obj.get("schema", ""))
+                        schema_by_ref[str(obj_ref)] = schema
+                        obj_by_ref[str(obj_ref)] = obj
+                        schema_counts[schema] = int(schema_counts.get(schema, 0)) + 1
                 except Exception as e:
                     issues.append({"kind": "object", "ref": str(obj_ref), "error": f"{type(e).__name__}: {e}"})
             elif op == "add_blob":
@@ -400,10 +425,153 @@ class PopperPad:
                 except Exception as e:
                     issues.append({"kind": "blob", "ref": str(blob_ref), "error": f"{type(e).__name__}: {e}"})
 
+        def require_obj_ref(ref: Any, *, where: str, expected_schema: str | None = None) -> None:
+            if not _is_ref(ref):
+                issues.append({"kind": "ref", "where": where, "error": "invalid sha256 ref", "ref": str(ref)})
+                return
+            r = str(ref)
+            if r not in obj_by_ref:
+                # Try to dereference anyway; report as "unlogged" if it exists.
+                try:
+                    obj = self.cas.get_json(r)
+                    if isinstance(obj, Mapping):
+                        validate_object(obj)
+                        issues.append({"kind": "ref", "where": where, "error": "ref exists in CAS but is not in log", "ref": r})
+                    else:
+                        issues.append({"kind": "ref", "where": where, "error": "ref exists in CAS but is not an object", "ref": r})
+                except Exception:
+                    issues.append({"kind": "ref", "where": where, "error": "missing object ref", "ref": r})
+                return
+            if expected_schema is not None:
+                got = schema_by_ref.get(r, "")
+                if got != expected_schema:
+                    issues.append({"kind": "ref", "where": where, "error": "schema mismatch", "ref": r, "expected": expected_schema, "got": got})
+
+        def require_blob_ref(ref: Any, *, where: str) -> None:
+            if not _is_ref(ref):
+                issues.append({"kind": "blob_ref", "where": where, "error": "invalid sha256 ref", "ref": str(ref)})
+                return
+            try:
+                self.cas.get_bytes(str(ref))
+            except Exception as e:
+                issues.append({"kind": "blob_ref", "where": where, "error": f"{type(e).__name__}: {e}", "ref": str(ref)})
+
+        # Cross-reference checks by schema.
+        for r, obj in obj_by_ref.items():
+            schema = str(obj.get("schema", ""))
+            try:
+                if schema == SCHEMA_EDGE_V1:
+                    et = str(obj.get("edge_type", ""))
+                    require_obj_ref(obj.get("from_ref"), where=f"edge.from_ref ({r})")
+                    require_obj_ref(obj.get("to_ref"), where=f"edge.to_ref ({r})")
+                    if obj.get("context_ref") is not None:
+                        require_obj_ref(obj.get("context_ref"), where=f"edge.context_ref ({r})", expected_schema=SCHEMA_CONTEXT_V1)
+                    evs = list(obj.get("evidence_refs", []) or [])
+                    for i, ev in enumerate(evs):
+                        require_obj_ref(ev, where=f"edge.evidence_refs[{i}] ({r})", expected_schema=SCHEMA_EVIDENCE_V1)
+                    if et == "semantic":
+                        obs = list(obj.get("obligations", []) or [])
+                        for i, ob in enumerate(obs):
+                            if not isinstance(ob, Mapping):
+                                issues.append({"kind": "edge", "where": f"edge.obligations[{i}] ({r})", "error": "obligation must be an object"})
+                                continue
+                            require_obj_ref(ob.get("recipe_ref"), where=f"edge.obligations[{i}].recipe_ref ({r})", expected_schema=SCHEMA_RECIPE_V1)
+
+                elif schema == SCHEMA_EVIDENCE_V1:
+                    require_obj_ref(obj.get("recipe_ref"), where=f"evidence.recipe_ref ({r})", expected_schema=SCHEMA_RECIPE_V1)
+                    if obj.get("context_ref") is not None:
+                        require_obj_ref(obj.get("context_ref"), where=f"evidence.context_ref ({r})", expected_schema=SCHEMA_CONTEXT_V1)
+                    for i, sref in enumerate(list(obj.get("subject_refs", []) or [])):
+                        require_obj_ref(sref, where=f"evidence.subject_refs[{i}] ({r})")
+                    if obj.get("stdout_ref"):
+                        require_blob_ref(obj.get("stdout_ref"), where=f"evidence.stdout_ref ({r})")
+                    if obj.get("stderr_ref"):
+                        require_blob_ref(obj.get("stderr_ref"), where=f"evidence.stderr_ref ({r})")
+                    for i, out in enumerate(list(obj.get("outputs", []) or [])):
+                        if not isinstance(out, Mapping):
+                            continue
+                        require_blob_ref(out.get("ref"), where=f"evidence.outputs[{i}].ref ({r})")
+
+                elif schema == SCHEMA_ARTIFACT_V1:
+                    require_blob_ref(obj.get("blob_ref"), where=f"artifact.blob_ref ({r})")
+
+                elif schema == SCHEMA_HYPOTHESIS_V1:
+                    if obj.get("domain_ref") is not None:
+                        require_obj_ref(obj.get("domain_ref"), where=f"hypothesis.domain_ref ({r})", expected_schema=SCHEMA_DOMAIN_V1)
+                    if obj.get("context_ref") is not None:
+                        require_obj_ref(obj.get("context_ref"), where=f"hypothesis.context_ref ({r})", expected_schema=SCHEMA_CONTEXT_V1)
+                    for i, rr in enumerate(list(obj.get("check_recipe_refs", []) or [])):
+                        require_obj_ref(rr, where=f"hypothesis.check_recipe_refs[{i}] ({r})", expected_schema=SCHEMA_RECIPE_V1)
+
+                elif schema == SCHEMA_CONTEXT_V1:
+                    if obj.get("domain_ref") is not None:
+                        require_obj_ref(obj.get("domain_ref"), where=f"context.domain_ref ({r})", expected_schema=SCHEMA_DOMAIN_V1)
+
+                elif schema == SCHEMA_RECIPE_V1:
+                    files = obj.get("files", {}) or {}
+                    if isinstance(files, Mapping):
+                        for name, spec in files.items():
+                            if isinstance(spec, Mapping) and "ref" in spec:
+                                require_blob_ref(spec.get("ref"), where=f"recipe.files[{name!r}].ref ({r})")
+                    stdin = obj.get("stdin", None)
+                    if isinstance(stdin, Mapping) and "ref" in stdin:
+                        require_blob_ref(stdin.get("ref"), where=f"recipe.stdin.ref ({r})")
+            except Exception as e:
+                issues.append({"kind": "doctor", "ref": r, "error": f"{type(e).__name__}: {e}"})
+
+        # Detect cycles in supersedes edges (should be a DAG).
+        sup: dict[str, list[str]] = {}
+        for eref, edge in obj_by_ref.items():
+            if str(edge.get("schema", "")) != SCHEMA_EDGE_V1:
+                continue
+            if str(edge.get("edge_type", "")) != "supersedes":
+                continue
+            a = edge.get("from_ref")
+            b = edge.get("to_ref")
+            if _is_ref(a) and _is_ref(b):
+                sup.setdefault(str(a), []).append(str(b))
+
+        cycle: list[str] | None = None
+        visited: set[str] = set()
+        onstack: set[str] = set()
+        stack: list[str] = []
+
+        def dfs(node: str) -> None:
+            nonlocal cycle
+            if cycle is not None:
+                return
+            if node in visited:
+                return
+            visited.add(node)
+            onstack.add(node)
+            stack.append(node)
+            for nxt in sup.get(node, []):
+                if cycle is not None:
+                    return
+                if nxt in onstack:
+                    if nxt in stack:
+                        j = stack.index(nxt)
+                        cycle = stack[j:] + [nxt]
+                    else:
+                        cycle = [nxt, nxt]
+                    return
+                dfs(nxt)
+            stack.pop()
+            onstack.remove(node)
+
+        for n in list(sup.keys()):
+            if n in visited:
+                continue
+            dfs(n)
+            if cycle is not None:
+                break
+        if cycle is not None:
+            issues.append({"kind": "supersedes_cycle", "cycle": cycle})
+
         rep = DoctorReport(
             ok=len(issues) == 0,
             issues=issues,
-            stats={"objects": objects, "blobs": blobs, **self.log.stats()},
+            stats={"objects": objects, "blobs": blobs, "schemas": dict(schema_counts), **self.log.stats()},
         )
         if strict and not rep.ok:
             raise ValueError(json.dumps(rep.__dict__, sort_keys=True, indent=2))

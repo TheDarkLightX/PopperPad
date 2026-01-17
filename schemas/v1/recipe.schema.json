@@ -13,12 +13,19 @@
     "requires_paths": { "type": "array", "items": { "type": "string" } },
     "timeout_ms": { "type": "integer", "minimum": 1 },
     "max_output_bytes": { "type": "integer", "minimum": 1 },
+    "max_capture_bytes": { "type": "integer", "minimum": 1 },
     "expect": {
       "type": "object",
       "properties": {
         "exit_code": { "type": "integer" },
         "stdout_contains": { "type": "string" },
-        "stderr_contains": { "type": "string" }
+        "stderr_contains": { "type": "string" },
+        "stdout_not_contains": { "type": "string" },
+        "stderr_not_contains": { "type": "string" },
+        "stdout_regex": { "type": "string" },
+        "stderr_regex": { "type": "string" },
+        "files_exist": { "type": "array", "items": { "type": "string" } },
+        "files_not_exist": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": true
     },
@@ -34,8 +41,29 @@
         "additionalProperties": true
       }
     },
-    "capture_paths": { "type": "array", "items": { "type": "string" } }
+    "stdin": {
+      "type": "object",
+      "properties": {
+        "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "text": { "type": "string" },
+        "binding": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "capture_paths": { "type": "array", "items": { "type": "string" } },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "max_bytes": { "type": "integer", "minimum": 1 },
+          "media_type": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
   },
   "additionalProperties": true
 }
-

@@ -19,6 +19,7 @@ description: Use PopperPad to maintain an append-only, falsification-first knowl
 
 - Never edit or delete existing pad files/objects; only add new objects and connect them with edges.
 - Supersede instead of mutating: add a new object and add an `edge_type="supersedes"` edge (`from_ref=new`, `to_ref=old`).
+- Prefer to run `popperpad doctor --pad ...` before reuse: it validates the log hash chain and checks common graph refs (including supersedes-cycle detection).
 
 ## Falsifiability gate (how to model “scientific claims”)
 

@@ -8,9 +8,11 @@ description: Use PopperPad recipes to run formal and semi-formal tools (Z3, CVC5
 ## Core pattern (portable, fail-closed)
 
 - Put the checker input(s) under `recipe.files` (inline `text` or `ref` to a CAS blob).
+- If a tool wants stdin, use `recipe.stdin` (`ref`/`text`/`binding`).
 - Use `recipe.requires` so missing tools produce `SKIP` evidence (no hard dependencies).
 - Prefer `expect.stdout_contains` over exit codes when tools always exit `0`.
-- Capture counterexamples/models/proof artifacts via `capture_paths` (write them to files during the run).
+- Capture counterexamples/models/proof artifacts via `capture_paths` (simple) or named `artifacts` (supports per-file `max_bytes` + `media_type`).
+- Use `expect.stdout_regex` / `stderr_regex` and `*_not_contains` for tighter checks when tool output is noisy.
 
 ## SMT (Z3 / CVC5) recipes
 
@@ -43,6 +45,7 @@ CVC5 (expect `sat`):
 ```
 
 If you need a model file, wrap the solver with a one-shot script that writes `model.txt` and add `capture_paths:["model.txt"]`.
+If the model/counterexample is large, cap capture size with `max_capture_bytes` or per-artifact `max_bytes`.
 
 ## Lean recipes
 

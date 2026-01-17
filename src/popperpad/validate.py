@@ -45,6 +45,20 @@ def _require_list(x: Any, msg: str) -> None:
     _require(isinstance(x, Sequence) and not isinstance(x, (str, bytes)), msg)
 
 
+def _require_file_spec(spec: Any, msg: str) -> None:
+    _require(isinstance(spec, Mapping), msg)
+    if "ref" in spec:
+        _require_ref(spec.get("ref"), "file spec ref must be sha256:<64hex>")
+        return
+    if "text" in spec:
+        _require_str(spec.get("text"), "file spec text must be a string")
+        return
+    if "binding" in spec:
+        _require_str(spec.get("binding"), "file spec binding must be a string")
+        return
+    raise ValueError("file spec must contain one of: ref, text, binding")
+
+
 def validate_object(obj: Any) -> None:
     _require(isinstance(obj, Mapping), "object must be a JSON object")
     schema = obj.get("schema")
@@ -105,15 +119,24 @@ def validate_object(obj: Any) -> None:
         _require(isinstance(files, Mapping), "recipe.files must be an object")
         for name, spec in files.items():
             _require_str(name, "recipe.files keys must be strings")
-            _require(isinstance(spec, Mapping), "recipe.files values must be objects")
-            if "ref" in spec:
-                _require_ref(spec.get("ref"), "recipe.files[*].ref must be sha256:<64hex>")
-            elif "text" in spec:
-                _require_str(spec.get("text"), "recipe.files[*].text must be a string")
-            elif "binding" in spec:
-                _require_str(spec.get("binding"), "recipe.files[*].binding must be a string")
-            else:
-                raise ValueError("recipe.files[*] must contain one of: ref, text, binding")
+            _require_file_spec(spec, "recipe.files values must be file specs")
+
+        stdin = obj.get("stdin", None)
+        if stdin is not None:
+            _require_file_spec(stdin, "recipe.stdin must be a file spec")
+
+        if "timeout_ms" in obj:
+            _require(isinstance(obj.get("timeout_ms"), int) and int(obj.get("timeout_ms")) > 0, "recipe.timeout_ms must be a positive int")
+        if "max_output_bytes" in obj:
+            _require(
+                isinstance(obj.get("max_output_bytes"), int) and int(obj.get("max_output_bytes")) > 0,
+                "recipe.max_output_bytes must be a positive int",
+            )
+        if "max_capture_bytes" in obj:
+            _require(
+                isinstance(obj.get("max_capture_bytes"), int) and int(obj.get("max_capture_bytes")) > 0,
+                "recipe.max_capture_bytes must be a positive int",
+            )
 
         expect = obj.get("expect", {})
         _require(isinstance(expect, Mapping), "recipe.expect must be an object")
@@ -123,11 +146,40 @@ def validate_object(obj: Any) -> None:
             _require_str(expect.get("stdout_contains"), "recipe.expect.stdout_contains must be a string")
         if "stderr_contains" in expect:
             _require_str(expect.get("stderr_contains"), "recipe.expect.stderr_contains must be a string")
+        if "stdout_not_contains" in expect:
+            _require_str(expect.get("stdout_not_contains"), "recipe.expect.stdout_not_contains must be a string")
+        if "stderr_not_contains" in expect:
+            _require_str(expect.get("stderr_not_contains"), "recipe.expect.stderr_not_contains must be a string")
+        if "stdout_regex" in expect:
+            _require_str(expect.get("stdout_regex"), "recipe.expect.stdout_regex must be a string")
+        if "stderr_regex" in expect:
+            _require_str(expect.get("stderr_regex"), "recipe.expect.stderr_regex must be a string")
+        if "files_exist" in expect:
+            fe = expect.get("files_exist")
+            _require_list(fe, "recipe.expect.files_exist must be a list")
+            for p in fe:
+                _require_str(p, "recipe.expect.files_exist items must be strings")
+        if "files_not_exist" in expect:
+            fe = expect.get("files_not_exist")
+            _require_list(fe, "recipe.expect.files_not_exist must be a list")
+            for p in fe:
+                _require_str(p, "recipe.expect.files_not_exist items must be strings")
 
         cap = obj.get("capture_paths", [])
         _require_list(cap, "recipe.capture_paths must be a list")
         for p in cap:
             _require_str(p, "recipe.capture_paths items must be strings")
+
+        artifacts = obj.get("artifacts", {})
+        _require(isinstance(artifacts, Mapping), "recipe.artifacts must be an object")
+        for aid, spec in artifacts.items():
+            _require_str(aid, "recipe.artifacts keys must be strings")
+            _require(isinstance(spec, Mapping), "recipe.artifacts values must be objects")
+            _require_str(spec.get("path"), "recipe.artifacts[*].path must be a string")
+            if "max_bytes" in spec:
+                _require(isinstance(spec.get("max_bytes"), int) and int(spec.get("max_bytes")) > 0, "recipe.artifacts[*].max_bytes must be a positive int")
+            if "media_type" in spec:
+                _require_str(spec.get("media_type"), "recipe.artifacts[*].media_type must be a string")
 
         return
 
@@ -183,6 +235,28 @@ def validate_object(obj: Any) -> None:
             _require(isinstance(o, Mapping), "evidence.outputs items must be objects")
             _require_str(o.get("name"), "evidence.outputs[*].name must be a string")
             _require_ref(o.get("ref"), "evidence.outputs[*].ref must be sha256:<64hex>")
+
+        if "argv" in obj:
+            argv = obj.get("argv")
+            _require_list(argv, "evidence.argv must be a list")
+            for a in argv:
+                _require_str(a, "evidence.argv items must be strings")
+        if "duration_ms" in obj:
+            _require(isinstance(obj.get("duration_ms"), int) and int(obj.get("duration_ms")) >= 0, "evidence.duration_ms must be an int >= 0")
+        for k in ("stdout_truncated", "stderr_truncated"):
+            if k in obj:
+                _require(isinstance(obj.get(k), bool), f"evidence.{k} must be a bool")
+        tc = obj.get("toolchain", {})
+        if tc:
+            _require(isinstance(tc, Mapping), "evidence.toolchain must be an object")
+            exes = tc.get("executables", {})
+            _require(isinstance(exes, Mapping), "evidence.toolchain.executables must be an object")
+            for _k, v in exes.items():
+                _require(isinstance(v, Mapping), "evidence.toolchain.executables values must be objects")
+                _require_str(v.get("path"), "evidence.toolchain.executables[*].path must be a string")
+                h = v.get("sha256", "")
+                if h:
+                    _require_ref(h, "evidence.toolchain.executables[*].sha256 must be sha256:<64hex>")
         return
 
     if schema == SCHEMA_ARTIFACT_V1:
@@ -225,4 +299,3 @@ def validate_object(obj: Any) -> None:
         return
 
     raise ValueError(f"unknown schema: {schema}")
-
