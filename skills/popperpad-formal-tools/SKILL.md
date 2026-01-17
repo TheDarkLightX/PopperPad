@@ -68,6 +68,8 @@ Lean + mathlib (toolchain may be local; keep optional):
 
 Isabelle (process a theory file; environment-dependent, so keep optional):
 
+- Install/download: https://isabelle.in.tum.de/overview.html (ensure the `isabelle` CLI is on `PATH`; quick check: `isabelle version`).
+
 ```json
 {
   "schema":"popperpad/recipe/v1",
