@@ -1,6 +1,8 @@
 # PopperPad
 
-PopperPad is an append-only, falsification-first knowledge ledger for LLM/agent swarms.
+PopperPad is scientific memory for humans and agents: an append-only,
+falsification-first knowledge ledger for hypotheses, recipes, evidence,
+counterexamples, artifacts, and typed relationships between claims.
 
 It is designed to be:
 - **Offline-first**: local directory, no services required.
@@ -20,6 +22,49 @@ It is designed to be:
 - Running a recipe emits an **evidence object** (stdout/stderr + captured artifacts + pass/fail/skip).
 - “Supported / falsified / disputed” is computed from evidence (and optional `refutes` edges), not written as truth.
 - Cross-domain transfer is represented by first-class **semantic edges** tagged with `≅/↦/⊑/⊒/~` plus explicit proof/check obligations.
+
+## Scientific memory
+
+PopperPad does not make claims true. It preserves the evidence needed to ask:
+
+- what exactly was claimed;
+- how the claim can be checked;
+- what evidence supports or refutes it;
+- which context, toolchain, dataset, or harness produced the evidence;
+- which newer claim supersedes or narrows an older claim;
+- who or what attested to the result.
+
+The core discipline is local-first and append-only. Users can keep private pads,
+mirror public pads, or import remote evidence while applying their own trust
+policy.
+
+## Decentralization and falsification markets
+
+PopperPad can grow from a local scientific-memory tool into decentralized
+scientific infrastructure. The recommended path is:
+
+1. keep PopperPad objects content-addressed and locally verifiable;
+2. publish bundles to IPFS or other content-addressed storage;
+3. anchor bundle roots on Tau Net, EVM chains, Bitcoin timestamping layers,
+   Solana, Cosmos, Substrate chains, Arweave, Filecoin, and other immutable
+   substrates through adapters;
+4. add optional smart-contract escrow for bounties, bonds, challenge windows,
+   and settlement events;
+5. introduce token incentives only for useful work: counterexamples,
+   reproduction, storage, curation, and recipe maintenance.
+
+The token or chain must not decide truth. Chains provide timestamping,
+immutability, payment, and governance rails. Scientific status remains computed
+from PopperPad evidence, context, recipes, signatures, and local trust policy.
+
+Design specs:
+
+- [Falsification market](docs/falsification-market.md)
+- [Decentralized adapter](docs/decentralized-adapter-spec.md)
+- [IPFS adapter](docs/ipfs-adapter-spec.md)
+- [Blockchain anchor adapter](docs/blockchain-anchor-spec.md)
+- [Chain adapter matrix](docs/chain-adapter-matrix.md)
+- [Tau Net adapter](docs/tau-net-adapter-spec.md)
 
 ## Recipe capabilities (v1)
 
