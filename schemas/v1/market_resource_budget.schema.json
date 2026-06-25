@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/market/resource-budget/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "budget_id",
+    "payer_ref",
+    "settlement_assets",
+    "limits",
+    "access_paths",
+    "truth_boundary"
+  ],
+  "properties": {
+    "schema": { "const": "popperpad/market/resource-budget/v1" },
+    "budget_id": { "type": "string", "minLength": 1 },
+    "work_order_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "payer_ref": { "type": "string", "minLength": 1 },
+    "settlement_assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "limits": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": ["compute", "storage", "api", "verifier", "retrieval"]
+      },
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "access_paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "enum": ["pay", "earn", "grant", "local"] }
+    },
+    "model_policy": {
+      "type": "object",
+      "properties": {
+        "cheap_model_first": { "type": "boolean" },
+        "max_paid_escalations": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "truth_boundary": { "const": "resource_funding_only" }
+  },
+  "additionalProperties": true
+}

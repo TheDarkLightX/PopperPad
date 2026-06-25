@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/market/work-order/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "task_type",
+    "claim_ref",
+    "max_payout",
+    "min_bond",
+    "deadline",
+    "challenge_window_seconds"
+  ],
+  "properties": {
+    "schema": { "const": "popperpad/market/work-order/v1" },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "proof",
+        "counterexample",
+        "reproduction",
+        "boundary",
+        "formalization",
+        "recipe_maintenance",
+        "artifact_availability",
+        "curation",
+        "forecast",
+        "verifier_improvement"
+      ]
+    },
+    "claim_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "context_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "accepted_recipe_refs": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+    },
+    "accepted_verifier_refs": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+    },
+    "max_payout": { "type": "string", "minLength": 1 },
+    "min_bond": { "type": "string", "minLength": 1 },
+    "deadline": { "type": "string", "minLength": 1 },
+    "payout_condition": {
+      "enum": [
+        "verifier_passes",
+        "valid_counterexample",
+        "independent_reproduction",
+        "boundary_certificate",
+        "maintenance_accepted",
+        "artifact_retrieval_passes",
+        "curation_used"
+      ]
+    },
+    "challenge_window_seconds": { "type": "integer", "minimum": 0 },
+    "scoring": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    }
+  },
+  "additionalProperties": true
+}

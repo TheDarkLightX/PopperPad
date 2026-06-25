@@ -2,22 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .canonical import canonical_json_bytes, sha256_bytes
-
-
-_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-
-
-def _require(cond: bool, msg: str) -> None:
-    if cond:
-        return
-    raise ValueError(msg)
+from .refs import REF_RE, require
 
 
 @dataclass(frozen=True)
@@ -73,7 +64,7 @@ class ContentAddressedStore:
         self.obj_dir = self.root / "objects" / "sha256"
 
     def _path_for_ref(self, ref: str) -> Path:
-        _require(isinstance(ref, str) and bool(_REF_RE.match(ref)), "invalid ref (expected sha256:<64hex>)")
+        require(isinstance(ref, str) and bool(REF_RE.match(ref)), "invalid ref (expected sha256:<64hex>)")
         hex_ = ref.split(":", 1)[1]
         return self.obj_dir / hex_[:2] / hex_[2:]
 
@@ -82,18 +73,18 @@ class ContentAddressedStore:
         p = self._path_for_ref(ref)
         if p.exists():
             cur = p.read_bytes()
-            _require(sha256_bytes(cur) == ref, "CAS corruption: existing object hash mismatch")
+            require(sha256_bytes(cur) == ref, "CAS corruption: existing object hash mismatch")
             return CasPutResult(ref=ref, path=str(p), bytes_written=0)
         p.parent.mkdir(parents=True, exist_ok=True)
         n = _atomic_write_bytes(p, data, mode=0o600)
         chk = p.read_bytes()
-        _require(sha256_bytes(chk) == ref, "CAS corruption: written object hash mismatch")
+        require(sha256_bytes(chk) == ref, "CAS corruption: written object hash mismatch")
         return CasPutResult(ref=ref, path=str(p), bytes_written=int(n))
 
     def get_bytes(self, ref: str) -> bytes:
         p = self._path_for_ref(ref)
         data = p.read_bytes()
-        _require(sha256_bytes(data) == ref, "CAS corruption: object hash mismatch on read")
+        require(sha256_bytes(data) == ref, "CAS corruption: object hash mismatch on read")
         return data
 
     def put_json(self, obj: Any) -> CasPutResult:
@@ -102,6 +93,6 @@ class ContentAddressedStore:
     def get_json(self, ref: str) -> Any:
         b = self.get_bytes(ref)
         obj = json.loads(b.decode("utf-8"))
-        _require(canonical_json_bytes(obj) == b, "CAS JSON is not canonical (integrity check failed)")
+        require(canonical_json_bytes(obj) == b, "CAS JSON is not canonical (integrity check failed)")
         return obj
 

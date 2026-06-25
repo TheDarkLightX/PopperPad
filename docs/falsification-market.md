@@ -1,19 +1,26 @@
-# PopperPad Falsification Market
+# PopperPad Verifiable Epistemic Artifact Market
 
 Status: design draft.
 
 This document turns PopperPad's "scientific memory" model into a decentralized
 market design. The market rewards people and agents for making claims testable,
-finding counterexamples, reproducing checks, preserving evidence, and maintaining
-the machinery that lets others verify results.
+constructing proofs, finding counterexamples, reproducing checks, preserving
+evidence, improving verifiers, and maintaining the machinery that lets others
+verify results.
 
 The central rule is simple:
 
-> The market can settle payouts. It cannot decide truth.
+> The market cannot decide truth by payment or vote. It can buy proof,
+> refutation, reproduction, and replayable evidence whose verification computes
+> scientific status.
 
-Scientific status remains a local computation over PopperPad objects, evidence,
-contexts, recipes, signatures, and the reader's trust policy. The chain records
-commitments, escrows, challenges, attestations, and payout events.
+Truth is not token-weighted; truth certificates are token-funded. Stake can fund
+search, proof construction, reproduction, and preservation, but only a
+replayable verifier-accepted certificate can change claim status.
+
+The chain records commitments, escrows, challenges, attestations, and payout
+events. Verifiers decide scoped check results. PopperPad stores the resulting
+certificates and evidence.
 
 ## Thesis
 
@@ -21,23 +28,30 @@ Most knowledge systems overpay novelty and underpay correction. PopperPad should
 do the opposite: make it economically attractive to find the exact place where a
 claim breaks.
 
-A falsification market rewards:
+A verifiable epistemic artifact market rewards:
 
 - precise hypotheses;
 - reproducible test recipes;
+- proofs;
 - counterexamples;
 - independent reproduction;
+- formalizations;
+- verifier improvements;
 - preserved artifacts;
 - schema and harness maintenance;
 - evidence that narrows a claim's valid scope.
 
-The goal is not to shame wrong claims. The goal is to make wrong or underspecified
-claims cheaper to discover, easier to remember, and harder to repeat.
+The goal is to buy verifiable epistemic deltas: proof when a claim can be shown,
+refutation when it breaks, reproduction when evidence needs confirmation, and
+boundary discovery when a broad claim can be turned into scoped truth.
 
 ## Non-negotiable Design Rules
 
-- **Truth is not token-weighted.** Stake can fund work, but it cannot make a
-  claim supported.
+- **Truth is not token-weighted; truth certificates are token-funded.** Stake
+  can fund search, proof, reproduction, and preservation, but it cannot make a
+  claim supported without verifier-accepted evidence.
+- **Proofs are first-class output.** A proof accepted by a declared verifier is
+  a valuable sellable artifact.
 - **Refutations are first-class output.** A counterexample is not a failure of
   the system. It is one of the system's most valuable products.
 - **Evidence is append-only.** New evidence supersedes or contextualizes old
@@ -296,20 +310,59 @@ PopperPad can represent the market with append-only JSON objects.
 ```json
 {
   "schema": "popperpad/market/bounty/v1",
-  "bounty_id": "example-refutation-bounty",
-  "market_type": "counterexample",
+  "bounty_id": "example-proof-bounty",
+  "market_type": "proof",
   "claim_ref": "sha256:...",
+  "accepted_verifier_refs": ["sha256:..."],
   "accepted_recipe_refs": ["sha256:..."],
   "context_ref": "sha256:...",
   "terms": {
     "deadline": "2026-12-31T23:59:59Z",
     "challenge_window_seconds": 604800,
     "max_payout": "1000 PPAD",
+    "payout_condition": "verifier_passes",
     "duplicate_policy": "first_valid_or_best_explained"
   },
   "settlement_ref": null
 }
 ```
+
+Proof bounties pay when:
+
+```text
+Check(claim, certificate, context) = PASS
+```
+
+Counterexample bounties pay when:
+
+```text
+Run(counterexample, recipe, context) = FAILS_CLAIM
+```
+
+### Truth Certificate
+
+```json
+{
+  "schema": "popperpad/certificate/truth/v1",
+  "certificate_id": "lean-proof-cert-001",
+  "certificate_kind": "proof",
+  "claim_ref": "sha256:...",
+  "context_ref": "sha256:...",
+  "verifier_ref": "sha256:...",
+  "recipe_ref": "sha256:...",
+  "evidence_refs": ["sha256:..."],
+  "artifact_refs": ["sha256:..."],
+  "verifier_result": {
+    "accepted": true,
+    "status": "supported"
+  },
+  "signatures": ["did:example:prover#sig"],
+  "truth_boundary": "verifier_checked_certificate"
+}
+```
+
+This is the sellable object. Payment funds its production; verifier acceptance
+makes it eligible for payout; PopperPad stores it as scientific memory.
 
 ### Submission
 
@@ -437,13 +490,18 @@ The chain should not say:
 
 ## Decentralization Roadmap
 
-### Phase 0: No-token prototype
+### Phase 0: Token-fueled local market objects
 
-Build the market with signed PopperPad objects and manual or centralized escrow.
+Build the market with signed PopperPad objects, explicit resource budgets, and
+external settlement assets such as Agoras, stablecoins, USD rails, grants, or
+manual settlement. The network should be token-fueled immediately, but not by a
+truth-token.
 
 Deliverables:
 
 - bounty, submission, attestation, challenge, and settlement schemas;
+- resource-budget schemas for compute, storage, model calls, verifier runs, and
+  retrieval;
 - local `doctor` checks for market objects;
 - duplicate detection by content hash and claim scope;
 - signed attestations;
@@ -452,18 +510,21 @@ Deliverables:
 Exit criteria:
 
 - users can open a bounty;
+- contributors can earn credits through useful work before buying credits;
 - another user can submit a counterexample;
 - independent users can attest reproduction;
 - the final settlement is recorded as append-only evidence.
 
 ### Phase 1: Decentralized storage and signatures
 
-Add real replication without a token.
+Add real replication with explicit storage credits, retrieval challenges, and
+slashable availability commitments.
 
 Deliverables:
 
 - pad mirroring;
 - artifact pinning;
+- resource-budget manifests;
 - signed manifests;
 - remote subscription;
 - local trust policy files;
@@ -514,21 +575,23 @@ Exit criteria:
 - fake attestation has negative expected value under the bounded model;
 - honest reproduction is paid enough to cover expected cost.
 
-### Phase 4: Tokenized incentives
+### Phase 4: Native PPAD token
 
-Introduce the protocol token only after the non-token market has evidence of
-real demand.
+Introduce a native PopperPad token only after the Agoras/external-asset plus
+PPAD-credit market has evidence of real demand.
 
-The token should pay for:
+The native token should pay for:
 
 - bounty creation;
 - submitter and attester bonds;
 - storage and indexing rewards;
+- model/API reimbursements;
+- agent compute budgets;
 - reproduction rewards;
 - recipe maintenance;
 - governance participation over protocol parameters.
 
-The token should not:
+The native token should not:
 
 - vote claims true;
 - buy scientific status;
@@ -556,17 +619,23 @@ Reasons not to:
 
 ## Tokenomics Draft
 
-Token name used below: `PPAD`. This is a placeholder design name.
+Token name used below: `PPAD`. This is a placeholder design name for a possible
+future native token. Before PPAD exists, PopperPad can use Agoras, stablecoins,
+USD rails, donations, grants, and non-transferable PPAD credits.
 
 ### Token Utility
 
-`PPAD` is used for:
+Accepted fuel assets and credits are used for:
 
 - bounty funding;
 - submitter bonds;
 - attester bonds;
 - storage bonds;
 - challenge deposits;
+- model/API reimbursements;
+- agent compute budgets;
+- proof construction rewards;
+- truth certificate rewards;
 - recipe maintenance rewards;
 - indexer fees;
 - governance over protocol parameters;
@@ -574,7 +643,7 @@ Token name used below: `PPAD`. This is a placeholder design name.
 
 ### Token Non-utility
 
-`PPAD` is not used for:
+Fuel assets, credits, or native PPAD are not used for:
 
 - deciding truth;
 - overriding evidence;
@@ -586,8 +655,11 @@ Token name used below: `PPAD`. This is a placeholder design name.
 
 High priority:
 
+- verifier-accepted proofs;
 - novel counterexamples;
 - independent reproduction of important claims;
+- useful formalizations;
+- verifier improvements;
 - preservation of high-value evidence bundles;
 - maintenance of widely used recipes;
 - discovery of scope boundaries.
@@ -790,13 +862,15 @@ Those require separate evidence, adversarial modeling, and live-market data.
 ## Summary
 
 The falsification market is a decentralized incentive layer around PopperPad's
-scientific memory. It pays for the work science needs most but often underfunds:
-counterexamples, reproduction, preservation, and maintenance.
+scientific memory. It is more precisely a market for verifiable epistemic
+artifacts. It pays for the work science needs most but often underfunds: proofs,
+counterexamples, reproduction, preservation, formalization, verifier
+improvement, and maintenance.
 
 The design should stay disciplined:
 
 - store scientific memory off-chain in content-addressed pads;
 - settle bounties and bonds on-chain;
-- reward falsification and reproduction;
+- reward proof, falsification, reproduction, and preservation;
 - govern protocol parameters;
 - never let token weight decide truth.

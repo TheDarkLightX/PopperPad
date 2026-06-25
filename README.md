@@ -20,12 +20,16 @@ It is designed to be:
 
 - Agents record **hypotheses** with explicit **check recipes**.
 - Running a recipe emits an **evidence object** (stdout/stderr + captured artifacts + pass/fail/skip).
-- “Supported / falsified / disputed” is computed from evidence (and optional `refutes` edges), not written as truth.
+- Verifiers such as Lean, Z3, replay harnesses, fuzzers, or benchmark runners
+  decide scoped check results. PopperPad stores those proof-carrying results and
+  derives “supported / falsified / disputed” graph status from them.
 - Cross-domain transfer is represented by first-class **semantic edges** tagged with `≅/↦/⊑/⊒/~` plus explicit proof/check obligations.
 
 ## Scientific memory
 
-PopperPad does not make claims true. It preserves the evidence needed to ask:
+PopperPad does not make claims true. It stores the knowledge of verifier-checked
+truths, refutations, reproductions, skips, and disputes. It preserves the
+evidence needed to ask:
 
 - what exactly was claimed;
 - how the claim can be checked;
@@ -48,18 +52,24 @@ scientific infrastructure. The recommended path is:
 3. anchor bundle roots on Tau Net, EVM chains, Bitcoin timestamping layers,
    Solana, Cosmos, Substrate chains, Arweave, Filecoin, and other immutable
    substrates through adapters;
-4. add optional smart-contract escrow for bounties, bonds, challenge windows,
-   and settlement events;
-5. introduce token incentives only for useful work: counterexamples,
-   reproduction, storage, curation, and recipe maintenance.
+4. use token or credit fuel immediately for real network costs: storage,
+   compute, model calls, verifier runs, indexing, and agent labor;
+5. add smart-contract escrow for bounties, bonds, challenge windows, and
+   settlement events;
+6. introduce a native PopperPad token only if the epistemic-work economy grows
+   enough to need its own monetary policy.
 
-The token or chain must not decide truth. Chains provide timestamping,
-immutability, payment, and governance rails. Scientific status remains computed
-from PopperPad evidence, context, recipes, signatures, and local trust policy.
+The token, chain, and Pad must not decide truth by themselves. Verifiers decide
+scoped check results. PopperPad stores the resulting knowledge and derives graph
+status from verifier evidence, context, recipes, signatures, and local trust
+policy.
 
 Design specs:
 
 - [Falsification market](docs/falsification-market.md)
+- [Algorithmic game theory decentralization](docs/algorithmic-game-theory-decentralization.md)
+- [Token fuel economics](docs/token-fuel-economics.md)
+- [Gamification economics](docs/gamification-economics.md)
 - [Decentralized adapter](docs/decentralized-adapter-spec.md)
 - [IPFS adapter](docs/ipfs-adapter-spec.md)
 - [Blockchain anchor adapter](docs/blockchain-anchor-spec.md)
@@ -115,6 +125,7 @@ Inspect:
 popperpad status  --pad ./pad <hypothesis_ref> --context <context_ref>
 popperpad doctor  --pad ./pad
 popperpad checkpoint --pad ./pad
+popperpad --pad ./pad gamification-leaderboard --point-kind xp
 ```
 
 Blobs (large artifacts):

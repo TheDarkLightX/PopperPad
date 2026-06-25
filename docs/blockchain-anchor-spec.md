@@ -382,7 +382,8 @@ The first chain anchor implementation should support:
 - event-only bundle anchoring;
 - local anchor verification;
 - IPFS CID in the storage URI;
-- no token requirement;
+- no token requirement for anchoring or local verification;
+- optional accepted-asset metadata for resource budgets;
 - no automated payout.
 
 The second implementation can add:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,16 +9,10 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from .canonical import canonical_json_bytes, stable_sha256
+from .refs import REF_RE, require
 
 
-_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LOG_SCHEMA_V1 = "popperpad/log_record/v1"
-
-
-def _require(cond: bool, msg: str) -> None:
-    if cond:
-        return
-    raise ValueError(msg)
 
 
 def utc_now_iso() -> str:
@@ -106,14 +99,14 @@ class AppendOnlyLog:
             return ""
         rec = json.loads(ln)
         rh = rec.get("record_hash", "")
-        _require(isinstance(rh, str) and bool(_REF_RE.match(rh)), "log corruption: invalid record_hash")
+        require(isinstance(rh, str) and bool(REF_RE.match(rh)), "log corruption: invalid record_hash")
         return rh
 
     def append(self, record_core: Mapping[str, Any]) -> AppendResult:
         rec = dict(record_core)
-        _require(rec.get("schema") == _LOG_SCHEMA_V1, f"log record schema must be {_LOG_SCHEMA_V1}")
-        _require(isinstance(rec.get("op"), str) and rec.get("op"), "log record op must be set")
-        _require(isinstance(rec.get("created_at"), str) and rec.get("created_at"), "log record created_at must be set")
+        require(rec.get("schema") == _LOG_SCHEMA_V1, f"log record schema must be {_LOG_SCHEMA_V1}")
+        require(isinstance(rec.get("op"), str) and rec.get("op"), "log record op must be set")
+        require(isinstance(rec.get("created_at"), str) and rec.get("created_at"), "log record created_at must be set")
 
         with self._lock():
             prev = self.head()
@@ -147,12 +140,12 @@ class AppendOnlyLog:
     def verify(self) -> None:
         prev = ""
         for i, rec in enumerate(self.iter_records()):
-            _require(rec.get("schema") == _LOG_SCHEMA_V1, f"log corruption: bad schema at line {i+1}")
+            require(rec.get("schema") == _LOG_SCHEMA_V1, f"log corruption: bad schema at line {i+1}")
             rh = rec.get("record_hash")
-            _require(isinstance(rh, str) and bool(_REF_RE.match(rh)), f"log corruption: bad record_hash at line {i+1}")
-            _require(str(rec.get("prev_record_hash", "")) == prev, f"log corruption: prev_record_hash mismatch at line {i+1}")
+            require(isinstance(rh, str) and bool(REF_RE.match(rh)), f"log corruption: bad record_hash at line {i+1}")
+            require(str(rec.get("prev_record_hash", "")) == prev, f"log corruption: prev_record_hash mismatch at line {i+1}")
             core = _strip_record_hash(rec)
-            _require(stable_sha256(core) == rh, f"log corruption: record_hash mismatch at line {i+1}")
+            require(stable_sha256(core) == rh, f"log corruption: record_hash mismatch at line {i+1}")
             prev = rh
 
     def stats(self) -> dict[str, Any]:

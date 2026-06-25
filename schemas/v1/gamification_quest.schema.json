@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/gamification/quest/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "quest_id",
+    "title",
+    "quest_type",
+    "objective",
+    "accepted_event_kinds",
+    "rewards",
+    "completion",
+    "truth_boundary"
+  ],
+  "properties": {
+    "schema": { "const": "popperpad/gamification/quest/v1" },
+    "quest_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "quest_type": {
+      "enum": [
+        "proof",
+        "counterexample",
+        "reproduction",
+        "boundary",
+        "maintenance",
+        "storage",
+        "curation",
+        "season"
+      ]
+    },
+    "domain_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "objective": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "target_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" }
+      },
+      "additionalProperties": true
+    },
+    "accepted_event_kinds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "proof_accepted",
+          "counterexample_verified",
+          "reproduction_completed",
+          "boundary_found",
+          "recipe_maintained",
+          "artifact_preserved",
+          "curation_used",
+          "quest_completed"
+        ]
+      }
+    },
+    "rewards": {
+      "type": "object",
+      "required": ["points"],
+      "properties": {
+        "points": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "enum": ["xp", "reputation", "season_score", "badge", "streak"]
+          },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "token_budget_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" }
+      },
+      "additionalProperties": true
+    },
+    "completion": {
+      "type": "object",
+      "properties": {
+        "required_evidence_count": { "type": "integer", "minimum": 1 },
+        "deadline": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "anti_abuse": {
+      "type": "object",
+      "properties": {
+        "max_rewards_per_agent": { "type": "integer", "minimum": 1 },
+        "requires_independent_reproduction": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "truth_boundary": { "const": "gamification_only" }
+  },
+  "additionalProperties": true
+}

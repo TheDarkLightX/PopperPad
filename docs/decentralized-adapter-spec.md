@@ -6,9 +6,11 @@ This specification defines how PopperPad pads, evidence bundles, and market
 objects can be published to decentralized storage and anchored on blockchains
 without changing PopperPad's core rule:
 
-> Truth is computed from evidence, context, recipes, and local trust policy.
-> Chains and storage networks provide durability, timestamping, incentives, and
-> immutability claims.
+> Verifiers such as Lean, SMT solvers, replay harnesses, fuzzers, and benchmark
+> runners decide scoped check results. PopperPad stores those proof-carrying
+> results and derives graph status from evidence, context, recipes, signatures,
+> and local trust policy. Chains and storage networks provide durability,
+> timestamping, incentives, and immutability claims.
 
 ## Goals
 
@@ -16,7 +18,8 @@ without changing PopperPad's core rule:
   appchains, and other immutable substrates.
 - Keep the scientific record content-addressed and append-only.
 - Let readers verify imported objects locally.
-- Separate storage, anchoring, settlement, governance, and truth computation.
+- Separate storage, anchoring, settlement, governance, verifier execution, and
+  PopperPad graph status.
 - Allow many backends without making PopperPad depend on one chain.
 
 ## Non-goals
@@ -388,7 +391,9 @@ The first decentralized adapter release should include:
 - generic chain anchor receipt format;
 - verification report format;
 - README links and examples;
-- no token requirement.
+- no token requirement for local verification or bundle import;
+- optional resource-budget receipts for network-funded storage, compute, and
+  indexing.
 
 ## Promotion Boundary
 
