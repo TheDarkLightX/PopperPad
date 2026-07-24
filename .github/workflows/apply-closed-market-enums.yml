@@ -1,0 +1,140 @@
+name: Apply closed market enums
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apply-closed-market-enums.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/fcis-market-transitions' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fcis-market-transitions
+      - name: Publish closed market sum types
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_BRANCH: agent/fcis-market-transitions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          path = Path('src/popperpad/core/market.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'from enum import Enum\nfrom typing import TypeAlias',
+              'from typing import ClassVar, TypeAlias',
+              1,
+          )
+          text = text.replace(
+              'from .values import Amount, DeeplyImmutable, FrozenDict, JsonValue, freeze_json',
+              'from .values import Amount, ClosedStrEnum, DeeplyImmutable, FrozenDict, JsonValue, freeze_json',
+              1,
+          )
+          old = '''class BountyPhase(str, Enum):
+              DRAFT = "draft"
+              OPEN = "open"
+              PAYABLE = "payable"
+              SETTLED = "settled"
+              EXPIRED = "expired"
+              CANCELED = "canceled"
+
+
+          class SubmissionStatus(str, Enum):
+              PENDING = "pending"
+              VERIFIED = "verified"
+              REJECTED = "rejected"
+
+
+          class ChallengeStatus(str, Enum):
+              OPEN = "open"
+              UPHELD = "upheld"
+              REJECTED = "rejected"
+          '''
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines())
+          new = '''class BountyPhase(ClosedStrEnum):
+              __slots__ = ()
+
+              DRAFT: ClassVar[BountyPhase]
+              OPEN: ClassVar[BountyPhase]
+              PAYABLE: ClassVar[BountyPhase]
+              SETTLED: ClassVar[BountyPhase]
+              EXPIRED: ClassVar[BountyPhase]
+              CANCELED: ClassVar[BountyPhase]
+              _symbols = (
+                  ("DRAFT", "draft"),
+                  ("OPEN", "open"),
+                  ("PAYABLE", "payable"),
+                  ("SETTLED", "settled"),
+                  ("EXPIRED", "expired"),
+                  ("CANCELED", "canceled"),
+              )
+
+
+          class SubmissionStatus(ClosedStrEnum):
+              __slots__ = ()
+
+              PENDING: ClassVar[SubmissionStatus]
+              VERIFIED: ClassVar[SubmissionStatus]
+              REJECTED: ClassVar[SubmissionStatus]
+              _symbols = (
+                  ("PENDING", "pending"),
+                  ("VERIFIED", "verified"),
+                  ("REJECTED", "rejected"),
+              )
+
+
+          class ChallengeStatus(ClosedStrEnum):
+              __slots__ = ()
+
+              OPEN: ClassVar[ChallengeStatus]
+              UPHELD: ClassVar[ChallengeStatus]
+              REJECTED: ClassVar[ChallengeStatus]
+              _symbols = (
+                  ("OPEN", "open"),
+                  ("UPHELD", "upheld"),
+                  ("REJECTED", "rejected"),
+              )
+          '''
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines())
+          if old not in text:
+              if 'class BountyPhase(ClosedStrEnum)' not in text:
+                  raise SystemExit('market enum block not found')
+          else:
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          headers = {
+              'Accept': 'application/vnd.github+json',
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'popperpad-closed-market-enums',
+          }
+          quoted = urllib.parse.quote(str(path), safe='/')
+          url = f"https://api.github.com/repos/{os.environ['GH_REPOSITORY']}/contents/{quoted}"
+          req = urllib.request.Request(url + '?ref=' + urllib.parse.quote(os.environ['GH_BRANCH']), headers=headers)
+          with urllib.request.urlopen(req) as response:
+              current = json.load(response)
+          body = json.dumps({
+              'message': 'Represent market states as sealed closed sums',
+              'content': base64.b64encode(path.read_bytes()).decode('ascii'),
+              'sha': current['sha'],
+              'branch': os.environ['GH_BRANCH'],
+          }).encode('utf-8')
+          req = urllib.request.Request(url, data=body, method='PUT', headers=headers)
+          with urllib.request.urlopen(req) as response:
+              print(json.load(response)['commit']['sha'])
+          PY
