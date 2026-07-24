@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum
 from typing import Any, Generic, TypeAlias, TypeVar, cast
 
 
@@ -28,6 +29,8 @@ class FrozenDict(Mapping[str, V], Generic[V]):
                 raise TypeError("FrozenDict keys must be strings")
             if key in owned:
                 raise ValueError(f"duplicate FrozenDict key: {key}")
+            if not is_deeply_immutable(value):
+                raise TypeError(f"FrozenDict value for {key!r} must be deeply immutable")
             owned[key] = value
         object.__setattr__(self, "_items", tuple(sorted(owned.items(), key=lambda item: item[0])))
 
@@ -94,15 +97,24 @@ def thaw_json(value: JsonValue) -> Any:
     return value
 
 
-def is_deeply_immutable(value: Any) -> bool:
-    if value is None or isinstance(value, (bool, int, str, bytes, Amount)):
+def is_deeply_immutable(value: Any, *, _seen: frozenset[int] = frozenset()) -> bool:
+    if value is None or isinstance(value, (bool, int, str, bytes, Enum, Amount)):
         return True
+    value_id = id(value)
+    if value_id in _seen:
+        return False
+    seen = _seen | {value_id}
     if isinstance(value, tuple):
-        return all(is_deeply_immutable(child) for child in value)
+        return all(is_deeply_immutable(child, _seen=seen) for child in value)
     if isinstance(value, frozenset):
-        return all(is_deeply_immutable(child) for child in value)
+        return all(is_deeply_immutable(child, _seen=seen) for child in value)
     if isinstance(value, FrozenDict):
-        return all(is_deeply_immutable(child) for _key, child in value.items_tuple())
+        return all(is_deeply_immutable(child, _seen=seen) for _key, child in value.items_tuple())
+    if is_dataclass(value) and not isinstance(value, type):
+        params = getattr(type(value), "__dataclass_params__", None)
+        return bool(params and params.frozen) and all(
+            is_deeply_immutable(getattr(value, field.name), _seen=seen) for field in fields(value)
+        )
     return False
 
 
