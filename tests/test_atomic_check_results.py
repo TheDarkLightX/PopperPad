@@ -117,6 +117,37 @@ def test_refutation_evidence_artifact_edge_and_blobs_publish_together(tmp_path: 
     pad.doctor(strict=True)
 
 
+def test_distinct_recipes_share_identical_artifact_without_duplicate_commit(tmp_path: Path) -> None:
+    pad = PopperPad(root=tmp_path / "pad")
+    pad.init()
+    script = "open('ce.txt','w').write('x=17'); print('found')"
+    first_recipe = _recipe(
+        pad,
+        recipe_id="refute-a",
+        verdict="refute",
+        script=script,
+        expect={"exit_code": 0, "stdout_contains": "found"},
+    )
+    second_recipe = _recipe(
+        pad,
+        recipe_id="refute-b",
+        verdict="refute",
+        script=script,
+        expect={"exit_code": 0, "stdout_contains": "found"},
+    )
+    hypothesis_ref = _hypothesis(pad, [first_recipe, second_recipe])
+
+    result = pad.run_hypothesis(hypothesis_ref, context_ref=None, mode="refute")
+
+    assert result.ok
+    assert len(result.evidence_refs) == 2
+    assert len(result.edge_refs) == 2
+    latest = list(pad.log.iter_raw_records())[-1]
+    assert len(latest["objects"]) == 5  # two evidence + one shared artifact + two edges
+    assert len({row["ref"] for row in latest["objects"]}) == 5
+    pad.doctor(strict=True)
+
+
 def test_failed_check_commits_evidence_but_no_truth_edge(tmp_path: Path) -> None:
     pad = PopperPad(root=tmp_path / "pad")
     pad.init()
