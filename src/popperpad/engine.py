@@ -188,7 +188,7 @@ class CheckEngine:
         require(committed.object_refs == expected_object_refs, "committed check refs differ from pure plan")
 
         return RunResult(
-            ok=verdict is AggregateVerdict.PASS,
+            ok=verdict == AggregateVerdict.PASS,
             verdict=verdict.value,
             evidence_refs=tuple(evidence_refs),
             edge_refs=tuple(edge_refs),
