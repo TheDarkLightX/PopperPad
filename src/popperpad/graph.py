@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping
+from typing import AbstractSet, Any, Callable, Iterable, Mapping
 
-from .refs import ClaimState, Ref, ValidationError, is_ref, require
-from .schemas import SCHEMA_EDGE_V1, SCHEMA_EVIDENCE_V1
+from .refs import ClaimState, is_ref, require
+from .schemas import SCHEMA_EDGE_V1, SCHEMA_EVIDENCE_V1, SCHEMA_RECIPE_V1
 
 
 EvidenceLookup = Callable[[str], Mapping[str, Any] | None]
+StatusObjects = Mapping[str, Mapping[str, Any]]
 
 
 @dataclass(frozen=True)
 class StatusResult:
     state: str  # unknown|supported|falsified|disputed
-    supports: list[str]
-    refutes: list[str]
+    supports: tuple[str, ...]
+    refutes: tuple[str, ...]
 
 
 def _edge_targets(edge: Mapping[str, Any], hyp_ref: str, context_ref: str | None) -> bool:
@@ -25,13 +26,81 @@ def _edge_targets(edge: Mapping[str, Any], hyp_ref: str, context_ref: str | None
     return True
 
 
+def _same_optional_ref(left: Any, right: Any) -> bool:
+    return (None if left is None else str(left)) == (None if right is None else str(right))
+
+
+def _edge_has_admissible_evidence(
+    edge: Mapping[str, Any],
+    *,
+    edge_type: str,
+    hyp_ref: str,
+    objects: StatusObjects,
+    accepted_recipe_refs: AbstractSet[str],
+) -> bool:
+    """Return whether a truth-bearing edge is backed by matching PASS evidence.
+
+    This is intentionally fail-closed. An edge is admissible only when at least
+    one referenced evidence object exists in the supplied immutable object view,
+    targets the same hypothesis and context, records PASS, and points to a recipe
+    whose declared verdict matches the edge kind.
+    """
+    expected_verdict = {"supports": "support", "refutes": "refute"}.get(edge_type)
+    if expected_verdict is None:
+        return False
+
+    evidence_refs = edge.get("evidence_refs", [])
+    if not isinstance(evidence_refs, (list, tuple)) or isinstance(evidence_refs, (str, bytes)):
+        return False
+
+    for raw_evidence_ref in evidence_refs:
+        if not is_ref(raw_evidence_ref):
+            continue
+        evidence_ref = str(raw_evidence_ref)
+        evidence = objects.get(evidence_ref)
+        if not isinstance(evidence, Mapping) or str(evidence.get("schema")) != SCHEMA_EVIDENCE_V1:
+            continue
+
+        subject_refs = evidence.get("subject_refs", [])
+        if not isinstance(subject_refs, (list, tuple)) or hyp_ref not in {str(ref) for ref in subject_refs}:
+            continue
+        if not _same_optional_ref(evidence.get("context_ref"), edge.get("context_ref")):
+            continue
+
+        result = evidence.get("result")
+        if not isinstance(result, Mapping) or str(result.get("status", "")).lower() != "pass":
+            continue
+
+        recipe_ref = evidence.get("recipe_ref")
+        if not is_ref(recipe_ref):
+            continue
+        recipe_key = str(recipe_ref)
+        if recipe_key not in accepted_recipe_refs:
+            continue
+        recipe = objects.get(recipe_key)
+        if not isinstance(recipe, Mapping) or str(recipe.get("schema")) != SCHEMA_RECIPE_V1:
+            continue
+        if str(recipe.get("verdict_on_pass", "support")) != expected_verdict:
+            continue
+        return True
+
+    return False
+
+
 def compute_status(
     edges: Iterable[tuple[str, Mapping[str, Any]]],
     *,
     hyp_ref: str,
     context_ref: str | None,
+    objects: StatusObjects,
+    accepted_recipe_refs: AbstractSet[str],
 ) -> StatusResult:
-    """Derive claim status from supports/refutes edges (pure over loaded edges)."""
+    """Derive claim status from evidence-admissible edges over loaded objects.
+
+    The function is a pure projection: callers load the relevant immutable
+    objects in the imperative shell, and this core function decides which edges
+    are admissible without performing I/O or executing a verifier.
+    """
     require(is_ref(hyp_ref), "invalid hypothesis ref")
     if context_ref is not None:
         require(is_ref(context_ref), "invalid context ref")
@@ -39,9 +108,19 @@ def compute_status(
     supports: list[str] = []
     refutes: list[str] = []
     for ref, edge in edges:
+        if str(edge.get("schema")) != SCHEMA_EDGE_V1:
+            continue
         if not _edge_targets(edge, hyp_ref, context_ref):
             continue
         edge_type = str(edge.get("edge_type"))
+        if not _edge_has_admissible_evidence(
+            edge,
+            edge_type=edge_type,
+            hyp_ref=hyp_ref,
+            objects=objects,
+            accepted_recipe_refs=accepted_recipe_refs,
+        ):
+            continue
         if edge_type == "supports":
             supports.append(ref)
         elif edge_type == "refutes":
@@ -49,8 +128,8 @@ def compute_status(
 
     return StatusResult(
         state=_classify(supports, refutes),
-        supports=sorted(supports),
-        refutes=sorted(refutes),
+        supports=tuple(sorted(supports)),
+        refutes=tuple(sorted(refutes)),
     )
 
 
