@@ -2,33 +2,65 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from enum import Enum
+from typing import ClassVar
 
 from .check import RunIntent
 from .codec import canonical_json_bytes, sha256_bytes
 from .result import Reject
-from .values import FrozenDict, JsonValue, freeze_json
+from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-class ExecutionStatus(str, Enum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    SKIP = "SKIP"
-    TIMEOUT = "TIMEOUT"
-    ERROR = "ERROR"
+@dataclass(frozen=True, slots=True)
+class ExecutionStatus(DeeplyImmutable):
+    value: str
+
+    PASS: ClassVar[ExecutionStatus]
+    FAIL: ClassVar[ExecutionStatus]
+    SKIP: ClassVar[ExecutionStatus]
+    TIMEOUT: ClassVar[ExecutionStatus]
+    ERROR: ClassVar[ExecutionStatus]
+
+    def __post_init__(self) -> None:
+        if type(self.value) is not str or self.value not in {
+            "PASS",
+            "FAIL",
+            "SKIP",
+            "TIMEOUT",
+            "ERROR",
+        }:
+            raise ValueError("invalid execution status")
+        DeeplyImmutable.__post_init__(self)
+
+
+ExecutionStatus.PASS = ExecutionStatus("PASS")
+ExecutionStatus.FAIL = ExecutionStatus("FAIL")
+ExecutionStatus.SKIP = ExecutionStatus("SKIP")
+ExecutionStatus.TIMEOUT = ExecutionStatus("TIMEOUT")
+ExecutionStatus.ERROR = ExecutionStatus("ERROR")
 
 
 @dataclass(frozen=True, slots=True)
-class CapturedOutput:
+class CapturedOutput(DeeplyImmutable):
     name: str
     ref: str
     byte_size: int
     truncated: bool
     path: str
     media_type: str = "application/octet-stream"
+
+    def __post_init__(self) -> None:
+        for field_name in ("name", "ref", "path", "media_type"):
+            value = getattr(self, field_name)
+            if type(value) is not str or not value:
+                raise TypeError(f"{field_name} must be a non-empty string")
+        if type(self.byte_size) is not int or self.byte_size < 0:
+            raise TypeError("byte_size must be a non-negative integer")
+        if type(self.truncated) is not bool:
+            raise TypeError("truncated must be a bool")
+        DeeplyImmutable.__post_init__(self)
 
     def as_json(self) -> FrozenDict[JsonValue]:
         value = freeze_json(
@@ -46,7 +78,7 @@ class CapturedOutput:
 
 
 @dataclass(frozen=True, slots=True)
-class CheckExecution:
+class CheckExecution(DeeplyImmutable):
     intent: RunIntent
     recipe_ref: str
     hypothesis_ref: str
@@ -64,13 +96,56 @@ class CheckExecution:
     stdout_truncated: bool
     stderr_truncated: bool
 
+    def __post_init__(self) -> None:
+        if type(self.intent) is not RunIntent:
+            raise TypeError("intent must be RunIntent")
+        for field_name in ("recipe_ref", "hypothesis_ref", "created_at", "reason"):
+            value = getattr(self, field_name)
+            if type(value) is not str or not value:
+                raise TypeError(f"{field_name} must be a non-empty string")
+        if self.context_ref is not None and type(self.context_ref) is not str:
+            raise TypeError("context_ref must be null or a string")
+        if type(self.status) is not ExecutionStatus:
+            raise TypeError("status must be ExecutionStatus")
+        if self.exit_code is not None and type(self.exit_code) is not int:
+            raise TypeError("exit_code must be null or an integer")
+        for field_name in ("stdout_ref", "stderr_ref"):
+            if type(getattr(self, field_name)) is not str:
+                raise TypeError(f"{field_name} must be a string")
+        if type(self.outputs) is not tuple or not all(
+            type(output) is CapturedOutput for output in self.outputs
+        ):
+            raise TypeError("outputs must contain CapturedOutput values")
+        if type(self.toolchain) is not FrozenDict:
+            raise TypeError("toolchain must be FrozenDict")
+        if type(self.duration_ms) is not int or self.duration_ms < 0:
+            raise TypeError("duration_ms must be a non-negative integer")
+        if type(self.argv) is not tuple or not all(type(arg) is str for arg in self.argv):
+            raise TypeError("argv must be a tuple of strings")
+        if type(self.stdout_truncated) is not bool or type(self.stderr_truncated) is not bool:
+            raise TypeError("truncation flags must be bools")
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class PlannedCheckObjects:
+class PlannedCheckObjects(DeeplyImmutable):
     objects: tuple[FrozenDict[JsonValue], ...]
     evidence_ref: str
     artifact_ref: str | None
     edge_ref: str | None
+
+    def __post_init__(self) -> None:
+        if type(self.objects) is not tuple or not all(
+            type(value) is FrozenDict for value in self.objects
+        ):
+            raise TypeError("objects must contain FrozenDict values")
+        if type(self.evidence_ref) is not str or not self.evidence_ref:
+            raise TypeError("evidence_ref must be a non-empty string")
+        for field_name in ("artifact_ref", "edge_ref"):
+            value = getattr(self, field_name)
+            if value is not None and (type(value) is not str or not value):
+                raise TypeError(f"{field_name} must be null or a non-empty string")
+        DeeplyImmutable.__post_init__(self)
 
 
 def _reject(code: str, field: str, reason: str) -> Reject:
@@ -148,10 +223,10 @@ def plan_check_objects(execution: CheckExecution) -> PlannedCheckObjects | Rejec
     objects: list[FrozenDict[JsonValue]] = [evidence]
     artifact_ref: str | None = None
     edge_ref: str | None = None
-    if execution.status is not ExecutionStatus.PASS:
+    if execution.status != ExecutionStatus.PASS:
         return PlannedCheckObjects(tuple(objects), evidence_ref, None, None)
 
-    if execution.intent is RunIntent.PROVE:
+    if execution.intent == RunIntent.PROVE:
         edge_from_ref = evidence_ref
         edge_type = "supports"
     else:
