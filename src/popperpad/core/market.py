@@ -114,6 +114,7 @@ class MarketPolicy(DeeplyImmutable):
     minimum_challenge_deposit: Amount
     slashable_findings: frozenset[str]
     treasury_ref: str = "protocol:treasury"
+    challenge_resolution_seconds: int = 86_400
 
     def __post_init__(self) -> None:
         if not self.slashable_findings:
@@ -259,6 +260,8 @@ MarketDecision: TypeAlias = (
 
 # This order is normative and tested. Earlier classes of invalidity always win.
 REJECTION_PRECEDENCE = (
+    "INVALID_STATE",
+    "INVALID_POLICY",
     "INVALID_COMMAND",
     "DUPLICATE_COMMAND",
     "WRONG_PHASE",
@@ -283,18 +286,21 @@ def apply_market_command(
 ) -> MarketDecision:
     """Apply one total deterministic market transition over immutable values."""
 
-    if not isinstance(
-        command,
-        (
-            OpenBounty,
-            SubmitCandidate,
-            VerifySubmission,
-            OpenChallenge,
-            ResolveChallenge,
-            AdvanceBounty,
-            SettleBounty,
-            CancelBounty,
-        ),
+    invalid_state = _validate_market_state(state)
+    if invalid_state is not None:
+        return _reject("INVALID_STATE", "state", invalid_state)
+    invalid_policy = _validate_market_policy(policy)
+    if invalid_policy is not None:
+        return _reject("INVALID_POLICY", "policy", invalid_policy)
+    if type(command) not in (
+        OpenBounty,
+        SubmitCandidate,
+        VerifySubmission,
+        OpenChallenge,
+        ResolveChallenge,
+        AdvanceBounty,
+        SettleBounty,
+        CancelBounty,
     ):
         return _reject("INVALID_COMMAND", "type", type(command).__name__)
     invalid = _validate_common_command(command)
@@ -314,7 +320,7 @@ def apply_market_command(
     if isinstance(command, ResolveChallenge):
         return _resolve_challenge(state, command, policy)
     if isinstance(command, AdvanceBounty):
-        return _advance_bounty(state, command)
+        return _advance_bounty(state, command, policy)
     if isinstance(command, SettleBounty):
         return _settle_bounty(state, command)
     if isinstance(command, CancelBounty):
@@ -523,6 +529,8 @@ def _resolve_challenge(
         return _reject("UNKNOWN_ENTITY", "challenge_id", command.challenge_id)
     if challenge.status is not ChallengeStatus.OPEN:
         return _reject("POLICY_MISMATCH", "challenge_status", challenge.status.value)
+    if command.now_epoch_s > _resolution_deadline(state, challenge, policy):
+        return _reject("TIME_WINDOW", "resolution_deadline", "challenge adjudication timed out")
     if command.verifier_ref not in state.terms.accepted_verifier_refs:
         return _reject("POLICY_MISMATCH", "verifier_ref", command.verifier_ref)
     submission = _submission(state, challenge.submission_id)
@@ -591,13 +599,43 @@ def _resolve_challenge(
     )
 
 
-def _advance_bounty(state: BountyState, command: AdvanceBounty) -> MarketDecision:
+def _advance_bounty(
+    state: BountyState,
+    command: AdvanceBounty,
+    policy: MarketPolicy,
+) -> MarketDecision:
     if state.phase is not BountyPhase.OPEN:
         return _reject("WRONG_PHASE", "phase", state.phase.value)
     if command.now_epoch_s <= _challenge_deadline(state):
         return _reject("TIME_WINDOW", "challenge_deadline", "window is still open")
-    if any(challenge.status is ChallengeStatus.OPEN for challenge in state.challenges):
-        return _reject("POLICY_MISMATCH", "challenges", "open challenge remains")
+    open_challenges = tuple(
+        challenge for challenge in state.challenges if challenge.status is ChallengeStatus.OPEN
+    )
+    if any(
+        command.now_epoch_s <= _resolution_deadline(state, challenge, policy)
+        for challenge in open_challenges
+    ):
+        return _reject("POLICY_MISMATCH", "challenges", "challenge adjudication is still open")
+
+    next_challenges = state.challenges
+    effects: list[MarketEffect] = []
+    for challenge in open_challenges:
+        timed_out = replace(
+            challenge,
+            status=ChallengeStatus.REJECTED,
+            deposit_locked=Amount.zero(),
+        )
+        next_challenges = _replace_challenge(next_challenges, timed_out)
+        effects.append(
+            _effect(
+                "slash_challenge_deposit",
+                policy.treasury_ref,
+                challenge.deposit_locked,
+                challenge.challenge_id,
+                finding_kind=challenge.finding_kind,
+                reason="resolution_timeout",
+            )
+        )
 
     eligible = tuple(
         submission.submission_id
@@ -608,12 +646,13 @@ def _advance_bounty(state: BountyState, command: AdvanceBounty) -> MarketDecisio
         next_state = replace(
             state,
             phase=BountyPhase.PAYABLE,
+            challenges=next_challenges,
             payable_submission_ids=eligible,
             processed_command_ids=state.processed_command_ids | frozenset({command.command_id}),
         )
-        return _accept(state, next_state, command, "bounty_payable", ())
+        return _accept(state, next_state, command, "bounty_payable", tuple(effects))
 
-    effects: list[MarketEffect] = [
+    effects.append(
         _effect(
             "refund_escrow",
             state.terms.sponsor_ref,
@@ -621,7 +660,7 @@ def _advance_bounty(state: BountyState, command: AdvanceBounty) -> MarketDecisio
             state.terms.bounty_id,
             reason="no_payable_submission",
         )
-    ]
+    )
     next_submissions: list[SubmissionState] = []
     for submission in state.submissions:
         if submission.bond_locked.atoms > 0:
@@ -642,6 +681,7 @@ def _advance_bounty(state: BountyState, command: AdvanceBounty) -> MarketDecisio
         phase=BountyPhase.EXPIRED,
         escrow_locked=Amount.zero(),
         submissions=tuple(next_submissions),
+        challenges=next_challenges,
         processed_command_ids=state.processed_command_ids | frozenset({command.command_id}),
     )
     return _committed_failure(
@@ -813,8 +853,134 @@ def _validate_common_command(command: MarketCommand) -> Reject | None:
     return None
 
 
+def _validate_market_state(value: object) -> str | None:
+    if type(value) is not BountyState:
+        return f"expected BountyState, got {type(value).__name__}"
+    state = value
+    if type(state.terms) is not BountyTerms:
+        return "terms must be BountyTerms"
+    terms = state.terms
+    if not all(
+        (
+            _valid_id(terms.bounty_id),
+            isinstance(terms.sponsor_ref, str) and bool(terms.sponsor_ref),
+            _valid_ref(terms.claim_ref),
+            terms.context_ref is None or _valid_ref(terms.context_ref),
+            type(terms.reward) is Amount and terms.reward.atoms > 0,
+            type(terms.minimum_submission_bond) is Amount,
+            _is_non_negative_int(terms.deadline_epoch_s),
+            _is_non_negative_int(terms.challenge_window_seconds),
+            _is_ref_frozenset(terms.accepted_recipe_refs, non_empty=True),
+            _is_ref_frozenset(terms.accepted_verifier_refs, non_empty=True),
+        )
+    ):
+        return "terms contain invalid runtime values"
+    if type(state.phase) is not BountyPhase:
+        return "phase must be BountyPhase"
+    if type(state.escrow_locked) is not Amount:
+        return "escrow_locked must be Amount"
+    if not isinstance(state.submissions, tuple) or any(
+        not _valid_submission_state(submission) for submission in state.submissions
+    ):
+        return "submissions contain invalid runtime values"
+    if not isinstance(state.challenges, tuple) or any(
+        not _valid_challenge_state(challenge) for challenge in state.challenges
+    ):
+        return "challenges contain invalid runtime values"
+    if not _is_id_tuple(state.payable_submission_ids):
+        return "payable_submission_ids must be a tuple of valid ids"
+    if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
+        return "payable_submission_ids must be unique"
+    if state.settlement_ref is not None and (
+        not isinstance(state.settlement_ref, str) or not state.settlement_ref
+    ):
+        return "settlement_ref must be null or a non-empty string"
+    if not isinstance(state.processed_command_ids, frozenset) or not all(
+        _valid_id(command_id) for command_id in state.processed_command_ids
+    ):
+        return "processed_command_ids must contain valid ids"
+    return None
+
+
+def _validate_market_policy(value: object) -> str | None:
+    if type(value) is not MarketPolicy:
+        return f"expected MarketPolicy, got {type(value).__name__}"
+    if not all(
+        type(amount) is Amount
+        for amount in (
+            value.minimum_bounty,
+            value.minimum_submission_bond,
+            value.minimum_challenge_deposit,
+        )
+    ):
+        return "minimum amounts must be Amount values"
+    if (
+        not isinstance(value.slashable_findings, frozenset)
+        or not value.slashable_findings
+        or not all(
+            isinstance(finding, str) and bool(finding)
+            for finding in value.slashable_findings
+        )
+    ):
+        return "slashable_findings must be a non-empty frozenset of strings"
+    if not isinstance(value.treasury_ref, str) or not value.treasury_ref:
+        return "treasury_ref must be a non-empty string"
+    if not _is_non_negative_int(value.challenge_resolution_seconds):
+        return "challenge_resolution_seconds must be a non-negative integer"
+    return None
+
+
+def _valid_submission_state(value: object) -> bool:
+    return type(value) is SubmissionState and all(
+        (
+            _valid_id(value.submission_id),
+            isinstance(value.submitter_ref, str) and bool(value.submitter_ref),
+            _valid_ref(value.recipe_ref),
+            _valid_ref(value.verifier_ref),
+            _is_ref_tuple(value.evidence_refs),
+            _is_ref_tuple(value.artifact_refs),
+            _is_non_negative_int(value.submitted_at),
+            type(value.status) is SubmissionStatus,
+            type(value.bond_locked) is Amount,
+            value.verifier_receipt_ref is None or _valid_ref(value.verifier_receipt_ref),
+        )
+    )
+
+
+def _valid_challenge_state(value: object) -> bool:
+    return type(value) is ChallengeState and all(
+        (
+            _valid_id(value.challenge_id),
+            _valid_id(value.submission_id),
+            isinstance(value.challenger_ref, str) and bool(value.challenger_ref),
+            isinstance(value.finding_kind, str) and bool(value.finding_kind),
+            _is_ref_tuple(value.evidence_refs),
+            _is_non_negative_int(value.opened_at),
+            type(value.status) is ChallengeStatus,
+            type(value.deposit_locked) is Amount,
+            value.verifier_receipt_ref is None or _valid_ref(value.verifier_receipt_ref),
+        )
+    )
+
+
 def _is_ref_tuple(value: object) -> bool:
-    return isinstance(value, tuple) and all(isinstance(item, str) for item in value)
+    return isinstance(value, tuple) and all(_valid_ref(item) for item in value)
+
+
+def _is_ref_frozenset(value: object, *, non_empty: bool = False) -> bool:
+    return (
+        isinstance(value, frozenset)
+        and (bool(value) or not non_empty)
+        and all(_valid_ref(item) for item in value)
+    )
+
+
+def _is_id_tuple(value: object) -> bool:
+    return isinstance(value, tuple) and all(_valid_id(item) for item in value)
+
+
+def _is_non_negative_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _accept(
@@ -1059,6 +1225,17 @@ def _replace_challenge(
 
 def _challenge_deadline(state: BountyState) -> int:
     return state.terms.deadline_epoch_s + state.terms.challenge_window_seconds
+
+
+def _resolution_deadline(
+    state: BountyState,
+    challenge: ChallengeState,
+    policy: MarketPolicy,
+) -> int:
+    return max(
+        _challenge_deadline(state),
+        challenge.opened_at + policy.challenge_resolution_seconds,
+    )
 
 
 def _valid_ref(value: object) -> bool:

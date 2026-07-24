@@ -11,6 +11,7 @@ from popperpad.core.market import (
     BountyState,
     BountyTerms,
     CancelBounty,
+    ChallengeStatus,
     MarketPolicy,
     OpenBounty,
     OpenChallenge,
@@ -61,6 +62,7 @@ def policy() -> MarketPolicy:
                 "fake_attestation",
             }
         ),
+        challenge_resolution_seconds=100,
     )
 
 
@@ -294,6 +296,59 @@ def test_timely_challenge_can_be_resolved_after_window_then_bounty_advances() ->
     assert advanced.next_state.phase is BountyPhase.PAYABLE
 
 
+def test_abandoned_challenge_defaults_after_bounded_adjudication_period() -> None:
+    challenged = apply_market_command(
+        verified_state(),
+        OpenChallenge(
+            "cmd-abandoned-challenge",
+            "abandoned-challenge",
+            "submission-1",
+            "did:example:challenger",
+            "invalid_signature",
+            (R("2"),),
+            Amount(50),
+            1_100,
+        ),
+        policy(),
+    )
+    assert isinstance(challenged, Accept)
+
+    still_adjudicable = apply_market_command(
+        challenged.next_state,
+        AdvanceBounty("cmd-too-early", 1_200),
+        policy(),
+    )
+    assert isinstance(still_adjudicable, Reject)
+    assert still_adjudicable.code == "POLICY_MISMATCH"
+
+    advanced = apply_market_command(
+        challenged.next_state,
+        AdvanceBounty("cmd-timeout-default", 1_201),
+        policy(),
+    )
+    assert isinstance(advanced, Accept)
+    assert advanced.next_state.phase is BountyPhase.PAYABLE
+    assert advanced.next_state.challenges[0].status is ChallengeStatus.REJECTED
+    assert advanced.next_state.challenges[0].deposit_locked == Amount.zero()
+    assert [effect.kind for effect in advanced.effects] == ["slash_challenge_deposit"]
+    assert advanced.effects[0].metadata["reason"] == "resolution_timeout"
+
+    late_resolution = apply_market_command(
+        challenged.next_state,
+        ResolveChallenge(
+            "cmd-late-resolution",
+            "abandoned-challenge",
+            R("d"),
+            R("3"),
+            True,
+            1_201,
+        ),
+        policy(),
+    )
+    assert isinstance(late_resolution, Reject)
+    assert late_resolution.code == "TIME_WINDOW"
+
+
 def test_no_payable_submission_expires_and_refunds_all_locked_value() -> None:
     state = submitted_state()
     rejected = apply_market_command(
@@ -327,7 +382,9 @@ def test_cancel_before_activity_refunds_escrow() -> None:
 
 
 def test_rejection_precedence_is_stable_and_rejects_without_state_or_effects() -> None:
-    assert REJECTION_PRECEDENCE[:4] == (
+    assert REJECTION_PRECEDENCE[:6] == (
+        "INVALID_STATE",
+        "INVALID_POLICY",
         "INVALID_COMMAND",
         "DUPLICATE_COMMAND",
         "WRONG_PHASE",
@@ -374,6 +431,51 @@ def test_malformed_immutable_command_fields_return_typed_rejection(command: obje
     rejected = apply_market_command(initial_bounty(terms()), command, policy())  # type: ignore[arg-type]
     assert isinstance(rejected, Reject)
     assert rejected.code == "INVALID_COMMAND"
+
+
+@pytest.mark.parametrize(
+    "state",
+    (
+        BountyState(terms=terms(), phase="open"),  # type: ignore[arg-type]
+        BountyState(terms=terms(), processed_command_ids=frozenset({7})),  # type: ignore[arg-type]
+    ),
+)
+def test_malformed_immutable_state_fields_return_typed_rejection(state: object) -> None:
+    rejected = apply_market_command(  # type: ignore[arg-type]
+        state,
+        OpenBounty("cmd-valid", "did:example:sponsor", Amount(1_000), 100),
+        policy(),
+    )
+    assert isinstance(rejected, Reject)
+    assert rejected.code == "INVALID_STATE"
+
+
+@pytest.mark.parametrize(
+    "bad_policy",
+    (
+        MarketPolicy(
+            minimum_bounty="bad",  # type: ignore[arg-type]
+            minimum_submission_bond=Amount(100),
+            minimum_challenge_deposit=Amount(50),
+            slashable_findings=frozenset({"invalid_signature"}),
+        ),
+        MarketPolicy(
+            minimum_bounty=Amount(1_000),
+            minimum_submission_bond=Amount(100),
+            minimum_challenge_deposit=Amount(50),
+            slashable_findings=frozenset({"invalid_signature"}),
+            challenge_resolution_seconds="never",  # type: ignore[arg-type]
+        ),
+    ),
+)
+def test_malformed_immutable_policy_fields_return_typed_rejection(bad_policy: object) -> None:
+    rejected = apply_market_command(  # type: ignore[arg-type]
+        initial_bounty(terms()),
+        OpenBounty("cmd-valid", "did:example:sponsor", Amount(1_000), 100),
+        bad_policy,
+    )
+    assert isinstance(rejected, Reject)
+    assert rejected.code == "INVALID_POLICY"
 
 
 def test_duplicate_command_is_rejected_before_command_specific_checks() -> None:
