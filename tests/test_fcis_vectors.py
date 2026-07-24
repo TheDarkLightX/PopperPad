@@ -37,7 +37,7 @@ def test_python_commit_planner_matches_shared_vectors() -> None:
             created_at=source["created_at"],
             objects=tuple(source["objects"]),
             blobs=tuple(
-                (blob["payload_utf8"].encode("utf-8"), blob["media_type"])
+                (bytes(blob["payload_bytes"]), blob["media_type"])
                 for blob in source["blobs"]
             ),
             outbox=tuple((effect["kind"], effect["payload"]) for effect in source["outbox"]),
