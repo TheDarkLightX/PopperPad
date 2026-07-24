@@ -31,33 +31,34 @@ jobs:
           import base64
           import json
           import os
+          import textwrap
           import urllib.parse
           import urllib.request
           from pathlib import Path
 
           market = Path('src/popperpad/core/market.py')
           text = market.read_text(encoding='utf-8')
-          old = '''    if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
-              return "payable_submission_ids must be unique"
-          if state.settlement_ref is not None and (
-          '''.replace('          ', '')
-          new = '''    if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
-              return "payable_submission_ids must be unique"
-          submissions_by_id = {submission.submission_id: submission for submission in state.submissions}
-          if len(submissions_by_id) != len(state.submissions):
-              return "submission ids must be unique"
-          for submission_id in state.payable_submission_ids:
-              submission = submissions_by_id.get(submission_id)
-              if submission is None:
-                  return "payable_submission_ids must reference existing submissions"
-              if submission.status is not SubmissionStatus.VERIFIED:
-                  return "payable_submission_ids must reference verified submissions"
-          if state.settlement_ref is not None and (
-          '''.replace('          ', '')
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif 'payable_submission_ids must reference verified submissions' not in text:
-              raise SystemExit('market state review-fix anchor missing')
+          if 'payable_submission_ids must reference verified submissions' not in text:
+              function_start = text.index('def _validate_market_state')
+              insertion_point = text.index(
+                  '    if state.settlement_ref is not None and (',
+                  function_start,
+              )
+              insertion = textwrap.dedent('''
+                  submissions_by_id = {
+                      submission.submission_id: submission for submission in state.submissions
+                  }
+                  if len(submissions_by_id) != len(state.submissions):
+                      return "submission ids must be unique"
+                  for submission_id in state.payable_submission_ids:
+                      submission = submissions_by_id.get(submission_id)
+                      if submission is None:
+                          return "payable_submission_ids must reference existing submissions"
+                      if submission.status is not SubmissionStatus.VERIFIED:
+                          return "payable_submission_ids must reference verified submissions"
+              ''')
+              insertion = textwrap.indent(insertion, '    ')
+              text = text[:insertion_point] + insertion + text[insertion_point:]
           market.write_text(text, encoding='utf-8')
 
           tests = Path('tests/test_market_transitions.py')
@@ -65,35 +66,34 @@ jobs:
           if 'from dataclasses import fields, replace' not in text:
               text = text.replace('from dataclasses import fields', 'from dataclasses import fields, replace', 1)
           if 'test_payable_state_rejects_unverified_submission_ids' not in text:
-              text += '''
+              text += textwrap.dedent('''
 
-          def test_payable_state_rejects_unverified_submission_ids() -> None:
-              payable = apply_market_command(
-                  verified_state(),
-                  AdvanceBounty("cmd-advance-malformed-payable", 1_101),
-                  policy(),
-              )
-              assert isinstance(payable, Accept)
-              rejected_submission = replace(
-                  payable.next_state.submissions[0],
-                  status=SubmissionStatus.REJECTED,
-              )
-              malformed = replace(payable.next_state, submissions=(rejected_submission,))
-              decision = apply_market_command(
-                  malformed,
-                  SettleBounty(
-                      "cmd-malformed-settle",
-                      "chain:tx:malformed",
-                      (Payout("did:example:refuter", "submission-1", Amount(1_000)),),
-                      1_102,
-                  ),
-                  policy(),
-              )
-              assert isinstance(decision, Reject)
-              assert decision.code == "INVALID_STATE"
-              assert "verified submissions" in decision.details["reason"]
-          '''
-              text = '\n'.join(line[10:] if line.startswith('          ') else line for line in text.splitlines()) + '\n'
+                  def test_payable_state_rejects_unverified_submission_ids() -> None:
+                      payable = apply_market_command(
+                          verified_state(),
+                          AdvanceBounty("cmd-advance-malformed-payable", 1_101),
+                          policy(),
+                      )
+                      assert isinstance(payable, Accept)
+                      rejected_submission = replace(
+                          payable.next_state.submissions[0],
+                          status=SubmissionStatus.REJECTED,
+                      )
+                      malformed = replace(payable.next_state, submissions=(rejected_submission,))
+                      decision = apply_market_command(
+                          malformed,
+                          SettleBounty(
+                              "cmd-malformed-settle",
+                              "chain:tx:malformed",
+                              (Payout("did:example:refuter", "submission-1", Amount(1_000)),),
+                              1_102,
+                          ),
+                          policy(),
+                      )
+                      assert isinstance(decision, Reject)
+                      assert decision.code == "INVALID_STATE"
+                      assert "verified submissions" in decision.details["reason"]
+              ''')
           tests.write_text(text, encoding='utf-8')
 
           os.system("python -m pip install -e '.[dev]' >/dev/null")
