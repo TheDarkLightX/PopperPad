@@ -73,7 +73,11 @@ fn write_canonical_json(value: &Value, output: &mut String) -> Result<(), CoreEr
             if encoded.contains('.') || encoded.contains('e') || encoded.contains('E') {
                 return Err(CoreError::FloatingPointNotAllowed);
             }
-            output.push_str(&encoded);
+            if encoded == "-0" {
+                output.push('0');
+            } else {
+                output.push_str(&encoded);
+            }
         }
         Value::String(value) => {
             output.push_str(
@@ -484,6 +488,20 @@ mod tests {
                 case.name
             );
         }
+    }
+
+    #[test]
+    fn negative_zero_normalizes_to_python_integer_zero() {
+        let negative_zero: Value = serde_json::from_str("{\"n\":-0}").unwrap();
+        let zero = json!({"n": 0});
+        assert_eq!(
+            canonical_json_bytes(&negative_zero).unwrap(),
+            b"{\"n\":0}\n"
+        );
+        assert_eq!(
+            canonical_hash("negative-zero/v1", &negative_zero).unwrap(),
+            canonical_hash("negative-zero/v1", &zero).unwrap()
+        );
     }
 
     #[test]
