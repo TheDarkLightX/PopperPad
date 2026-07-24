@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/esso-market-refinement
-      - name: Publish reviewed source payload through Contents API
+      - name: Publish verified ESSO refinement sources
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
@@ -87,6 +87,7 @@ jobs:
         run: |
           python - <<'PY'
           import base64
+          import hashlib
           import io
           import json
           import os
@@ -96,18 +97,28 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          source = Path('.github/workflows/apply-esso-market-refinement.yml').read_text(encoding='utf-8')
-          encoded = source.split("<<'PAYLOAD'\n", 1)[1].split("\nPAYLOAD\n", 1)[0].strip()
+          chunk_paths = sorted(Path('.esso-payload').glob('part-*'))
+          encoded = b''.join(path.read_bytes() for path in chunk_paths)
+          if len(encoded) != 25_476:
+              raise SystemExit(f'payload length differs: {len(encoded)}')
+          if hashlib.sha256(encoded).hexdigest() != '3f9c9db2aa810f1a9eac9346b431c316620732364a505389bb43aee36169eec9':
+              raise SystemExit('encoded payload digest differs')
+          raw = base64.b64decode(encoded, validate=True)
+          if hashlib.sha256(raw).hexdigest() != 'f24316cb6098c90ca3b020aa183e96eabfb20f684de9a451d997376e6ccfe250':
+              raise SystemExit('decoded ZIP digest differs')
+
           expected = {
-              'src/popperpad/core/market.py',
-              'src/popperpad/esso_market_adapter.py',
-              'tests/test_market_transitions.py',
-              'tests/test_esso_market_adapter.py',
+              'src/popperpad/core/market.py': '92a0e85563c8363c382da3527a774fd717f096924691158309c396f3caeaeb6a',
+              'src/popperpad/esso_market_adapter.py': 'f42d3601cbbe2cd5a4f87e9b521d815345f66da7918486d5eb1e7a52d1bed9b8',
+              'tests/test_market_transitions.py': 'a17142ea4ecd9877dbb4d31ec9e4646bb5fd94c239bab5449d6351aaf44f9ea3',
+              'tests/test_esso_market_adapter.py': '4937704b522d55eeaf37493e92d014c688fc9c22619f932069d4b20a50701281',
           }
-          archive = zipfile.ZipFile(io.BytesIO(base64.b64decode(encoded, validate=True)))
-          names = set(archive.namelist())
-          if names != expected:
-              raise SystemExit(f'archive paths differ: {sorted(names)}')
+          archive = zipfile.ZipFile(io.BytesIO(raw))
+          if set(archive.namelist()) != set(expected):
+              raise SystemExit(f'archive paths differ: {sorted(archive.namelist())}')
+          for path, digest in expected.items():
+              if hashlib.sha256(archive.read(path)).hexdigest() != digest:
+                  raise SystemExit(f'archive digest differs: {path}')
 
           token = os.environ['GH_TOKEN']
           repository = os.environ['GH_REPOSITORY']
@@ -131,7 +142,7 @@ jobs:
                       return 404, None
                   raise RuntimeError(f'{method} {url}: HTTP {error.code}: {payload}') from error
 
-          for path in sorted(names):
+          for path in sorted(expected):
               quoted = urllib.parse.quote(path, safe='/')
               url = f'https://api.github.com/repos/{repository}/contents/{quoted}'
               status, current = request(url + '?' + urllib.parse.urlencode({'ref': branch}))
