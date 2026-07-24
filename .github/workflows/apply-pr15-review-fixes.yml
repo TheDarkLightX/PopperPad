@@ -38,24 +38,22 @@ jobs:
           market = Path('src/popperpad/core/market.py')
           text = market.read_text(encoding='utf-8')
           old = '''    if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
-                  return "payable_submission_ids must be unique"
-              if state.settlement_ref is not None and (
-          '''
-          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
+              return "payable_submission_ids must be unique"
+          if state.settlement_ref is not None and (
+          '''.replace('          ', '')
           new = '''    if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
-                  return "payable_submission_ids must be unique"
-              submissions_by_id = {submission.submission_id: submission for submission in state.submissions}
-              if len(submissions_by_id) != len(state.submissions):
-                  return "submission ids must be unique"
-              for submission_id in state.payable_submission_ids:
-                  submission = submissions_by_id.get(submission_id)
-                  if submission is None:
-                      return "payable_submission_ids must reference existing submissions"
-                  if submission.status is not SubmissionStatus.VERIFIED:
-                      return "payable_submission_ids must reference verified submissions"
-              if state.settlement_ref is not None and (
-          '''
-          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+              return "payable_submission_ids must be unique"
+          submissions_by_id = {submission.submission_id: submission for submission in state.submissions}
+          if len(submissions_by_id) != len(state.submissions):
+              return "submission ids must be unique"
+          for submission_id in state.payable_submission_ids:
+              submission = submissions_by_id.get(submission_id)
+              if submission is None:
+                  return "payable_submission_ids must reference existing submissions"
+              if submission.status is not SubmissionStatus.VERIFIED:
+                  return "payable_submission_ids must reference verified submissions"
+          if state.settlement_ref is not None and (
+          '''.replace('          ', '')
           if old in text:
               text = text.replace(old, new, 1)
           elif 'payable_submission_ids must reference verified submissions' not in text:
@@ -64,7 +62,8 @@ jobs:
 
           tests = Path('tests/test_market_transitions.py')
           text = tests.read_text(encoding='utf-8')
-          text = text.replace('from dataclasses import fields', 'from dataclasses import fields, replace', 1)
+          if 'from dataclasses import fields, replace' not in text:
+              text = text.replace('from dataclasses import fields', 'from dataclasses import fields, replace', 1)
           if 'test_payable_state_rejects_unverified_submission_ids' not in text:
               text += '''
 
