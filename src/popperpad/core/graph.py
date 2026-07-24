@@ -2,24 +2,38 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .values import DeeplyImmutable
+
 
 @dataclass(frozen=True, slots=True)
-class RecipeRecord:
+class RecipeRecord(DeeplyImmutable):
     ref: str
     verdict_on_pass: str
 
+    def __post_init__(self) -> None:
+        _require_strings(ref=self.ref, verdict_on_pass=self.verdict_on_pass)
+        if self.verdict_on_pass not in {"support", "refute"}:
+            raise ValueError("verdict_on_pass must be support or refute")
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class EvidenceRecord:
+class EvidenceRecord(DeeplyImmutable):
     ref: str
     recipe_ref: str
     context_ref: str | None
     subject_refs: tuple[str, ...]
     status: str
 
+    def __post_init__(self) -> None:
+        _require_strings(ref=self.ref, recipe_ref=self.recipe_ref, status=self.status)
+        _require_optional_string("context_ref", self.context_ref)
+        _require_string_tuple("subject_refs", self.subject_refs)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class TruthEdge:
+class TruthEdge(DeeplyImmutable):
     ref: str
     kind: str  # supports|refutes
     from_ref: str
@@ -27,9 +41,22 @@ class TruthEdge:
     context_ref: str | None
     evidence_refs: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        _require_strings(
+            ref=self.ref,
+            kind=self.kind,
+            from_ref=self.from_ref,
+            to_ref=self.to_ref,
+        )
+        if self.kind not in {"supports", "refutes"}:
+            raise ValueError("truth edge kind must be supports or refutes")
+        _require_optional_string("context_ref", self.context_ref)
+        _require_string_tuple("evidence_refs", self.evidence_refs)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class StatusSnapshot:
+class StatusSnapshot(DeeplyImmutable):
     hypothesis_ref: str
     context_ref: str | None
     accepted_recipe_refs: frozenset[str]
@@ -37,22 +64,43 @@ class StatusSnapshot:
     evidence: tuple[EvidenceRecord, ...]
     recipes: tuple[RecipeRecord, ...]
 
+    def __post_init__(self) -> None:
+        _require_strings(hypothesis_ref=self.hypothesis_ref)
+        _require_optional_string("context_ref", self.context_ref)
+        _require_string_frozenset("accepted_recipe_refs", self.accepted_recipe_refs)
+        _require_value_tuple("edges", self.edges, TruthEdge)
+        _require_value_tuple("evidence", self.evidence, EvidenceRecord)
+        _require_value_tuple("recipes", self.recipes, RecipeRecord)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class StatusResult:
+class StatusResult(DeeplyImmutable):
     state: str  # unknown|supported|falsified|disputed
     supports: tuple[str, ...]
     refutes: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        _require_strings(state=self.state)
+        if self.state not in {"unknown", "supported", "falsified", "disputed"}:
+            raise ValueError("invalid derived status")
+        _require_string_tuple("supports", self.supports)
+        _require_string_tuple("refutes", self.refutes)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class Obligation:
+class Obligation(DeeplyImmutable):
     obligation_id: str
     recipe_ref: str
 
+    def __post_init__(self) -> None:
+        _require_strings(obligation_id=self.obligation_id, recipe_ref=self.recipe_ref)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class SemanticEdge:
+class SemanticEdge(DeeplyImmutable):
     ref: str
     from_ref: str
     to_ref: str
@@ -60,24 +108,79 @@ class SemanticEdge:
     obligations: tuple[Obligation, ...]
     evidence_refs: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        _require_strings(
+            ref=self.ref,
+            from_ref=self.from_ref,
+            to_ref=self.to_ref,
+            tag=self.tag,
+        )
+        _require_value_tuple("obligations", self.obligations, Obligation)
+        _require_string_tuple("evidence_refs", self.evidence_refs)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class TransferSnapshot:
+class TransferSnapshot(DeeplyImmutable):
     edges: tuple[SemanticEdge, ...]
     evidence: tuple[EvidenceRecord, ...]
 
+    def __post_init__(self) -> None:
+        _require_value_tuple("edges", self.edges, SemanticEdge)
+        _require_value_tuple("evidence", self.evidence, EvidenceRecord)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class OpenObligation:
+class OpenObligation(DeeplyImmutable):
     edge_ref: str
     obligation_id: str
     recipe_ref: str
 
+    def __post_init__(self) -> None:
+        _require_strings(
+            edge_ref=self.edge_ref,
+            obligation_id=self.obligation_id,
+            recipe_ref=self.recipe_ref,
+        )
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class TransferPath:
+class TransferPath(DeeplyImmutable):
     edge_refs: tuple[str, ...]
     obligations_open: tuple[OpenObligation, ...]
+
+    def __post_init__(self) -> None:
+        _require_string_tuple("edge_refs", self.edge_refs)
+        _require_value_tuple("obligations_open", self.obligations_open, OpenObligation)
+        DeeplyImmutable.__post_init__(self)
+
+
+def _require_strings(**values: object) -> None:
+    for field_name, value in values.items():
+        if type(value) is not str or not value:
+            raise TypeError(f"{field_name} must be a non-empty string")
+
+
+def _require_optional_string(field_name: str, value: object) -> None:
+    if value is not None and (type(value) is not str or not value):
+        raise TypeError(f"{field_name} must be null or a non-empty string")
+
+
+def _require_string_tuple(field_name: str, value: object) -> None:
+    if type(value) is not tuple or not all(type(item) is str for item in value):
+        raise TypeError(f"{field_name} must be a tuple of strings")
+
+
+def _require_string_frozenset(field_name: str, value: object) -> None:
+    if type(value) is not frozenset or not all(type(item) is str for item in value):
+        raise TypeError(f"{field_name} must be a frozenset of strings")
+
+
+def _require_value_tuple(field_name: str, value: object, item_type: type[object]) -> None:
+    if type(value) is not tuple or not all(type(item) is item_type for item in value):
+        raise TypeError(f"{field_name} must be a tuple of {item_type.__name__} values")
 
 
 def derive_status(snapshot: StatusSnapshot) -> StatusResult:
