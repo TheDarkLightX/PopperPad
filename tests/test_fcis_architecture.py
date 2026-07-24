@@ -20,11 +20,15 @@ from popperpad.core import (
     freeze_json,
     thaw_json,
 )
+from popperpad.core.check import AggregateVerdict, CheckSummary, RunIntent, decide_check_summary
+from popperpad.core.recipe import ProcessObservation, RecipePlan, evaluate_observation, plan_recipe
 
 
 CORE_MODULES = (
+    "popperpad.core.check",
     "popperpad.core.codec",
     "popperpad.core.mechanism",
+    "popperpad.core.recipe",
     "popperpad.core.result",
     "popperpad.core.values",
 )
@@ -104,6 +108,46 @@ def test_decision_variants_are_data_not_exceptions_or_effects() -> None:
     assert reject.code == "MISSING_EVIDENCE"
     assert accepted.effects == ("write",)
     assert failed.next_state == Amount(1)
+
+
+def test_recipe_planning_owns_input_and_returns_no_live_dependencies() -> None:
+    raw = {
+        "argv": ["tool", "--check"],
+        "files": {"claim.txt": {"text": "forall x"}},
+        "expect": {"exit_code": 0, "stdout_contains": "valid", "files_exist": ["proof.bin"]},
+        "env": {"MODE": "verify"},
+    }
+    planned = plan_recipe(raw)
+    assert isinstance(planned, RecipePlan)
+    raw["argv"].append("--mutated")  # type: ignore[union-attr]
+    raw["files"]["claim.txt"]["text"] = "changed"  # type: ignore[index]
+    assert planned.argv == ("tool", "--check")
+    assert planned.files["claim.txt"].value == "forall x"
+
+
+def test_recipe_observation_classification_is_pure() -> None:
+    planned = plan_recipe(
+        {
+            "argv": ["tool"],
+            "expect": {"exit_code": 0, "stdout_regex": "counterexample", "files_exist": ["witness.json"]},
+        }
+    )
+    assert isinstance(planned, RecipePlan)
+    observation = ProcessObservation(
+        exit_code=0,
+        stdout_text="counterexample found",
+        stderr_text="",
+        existing_paths=frozenset({"witness.json"}),
+    )
+    assert evaluate_observation(planned, observation).status == "PASS"
+    assert evaluate_observation(planned, observation) == evaluate_observation(planned, observation)
+
+
+def test_check_aggregation_is_a_core_decision() -> None:
+    assert decide_check_summary(CheckSummary(RunIntent.PROVE, ("pass",))) is AggregateVerdict.PASS
+    assert decide_check_summary(CheckSummary(RunIntent.PROVE, ("fail",))) is AggregateVerdict.FAIL
+    assert decide_check_summary(CheckSummary(RunIntent.REFUTE, ("pass",))) is AggregateVerdict.PASS
+    assert decide_check_summary(CheckSummary(RunIntent.REFUTE, ("inconclusive",))) is AggregateVerdict.INCONCLUSIVE
 
 
 @pytest.mark.parametrize(
