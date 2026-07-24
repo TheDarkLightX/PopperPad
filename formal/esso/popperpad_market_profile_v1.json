@@ -1,29 +1,59 @@
 {
-  "schema": "popperpad/esso-profile-binding/v1",
-  "profile_id": "popperpad.falsification-market.single-slot.v1",
-  "esso_repository": "TheDarkLightX/ESSO",
-  "esso_model_path": "examples/popperpad/falsification_market_single_slot_v1.yaml",
+  "actions": [
+    "advance",
+    "cancel",
+    "close_challenge_window",
+    "close_deadline",
+    "open_bounty",
+    "open_challenge",
+    "resolve_rejected",
+    "resolve_upheld",
+    "settle",
+    "submit_candidate",
+    "verify_accept",
+    "verify_reject"
+  ],
   "esso_checker_path": "examples/popperpad/check_falsification_market.py",
+  "esso_model_path": "examples/popperpad/falsification_market_single_slot_v1.yaml",
+  "esso_repository": "TheDarkLightX/ESSO",
+  "expected_reachable_refinement": {
+    "divergences": 0,
+    "enabled_transitions": 41,
+    "reachable_states": 35,
+    "state_action_pairs": 420
+  },
+  "nonclaims": [
+    "arbitrary_market_cardinality",
+    "unbounded_liveness_or_fairness",
+    "verifier_semantic_correctness",
+    "production_datastore_linearizability",
+    "chain_or_token_refinement"
+  ],
+  "profile_id": "popperpad.falsification-market.single-slot.v1",
+  "required_gates": [
+    "canonical_esso_ir",
+    "z3_one_step_inductiveness",
+    "named_disaster_mutants_killed_by_counterexample",
+    "post_window_challenge_resolvability_trace",
+    "complete_reachable_mounted_runtime_refinement",
+    "source_hash_binding"
+  ],
   "runtime_adapter_module": "popperpad.esso_market_adapter",
   "runtime_input_schema": "popperpad/esso-market-step/v1",
   "runtime_result_schema": "popperpad/esso-market-result/v1",
   "runtime_source_blobs": {
-    "src/popperpad/core/market.py": "b18b8a74cab65ce6456b7321989b58b3d09f78be",
-    "src/popperpad/esso_market_adapter.py": "28aca79b7eb0015e5adc1025836984969a5a0c84"
+    "src/popperpad/core/market.py": "4ae3c90406accbb119ac2843e44537dea109a5c3",
+    "src/popperpad/core/market_invariants.py": "4adad93c93e4edeb27ef53d7ca08a7aa35d5913b",
+    "src/popperpad/esso_market_adapter.py": "f01f6f79037da26e27561800608c5e9a20b0933f"
   },
-  "expected_reachable_refinement": {
-    "reachable_states": 35,
-    "state_action_pairs": 420,
-    "enabled_transitions": 41,
-    "divergences": 0
-  },
+  "schema": "popperpad/esso-profile-binding/v1",
   "scope": {
     "bounties": 1,
-    "submissions": 1,
+    "challenge_deposit_atoms": 1,
     "challenges": 1,
     "reward_atoms": 2,
     "submission_bond_atoms": 1,
-    "challenge_deposit_atoms": 1
+    "submissions": 1
   },
   "state_fields": [
     "phase",
@@ -41,34 +71,5 @@
     "bond_slashed_atoms",
     "deposit_refund_atoms",
     "deposit_slashed_atoms"
-  ],
-  "actions": [
-    "advance",
-    "cancel",
-    "close_challenge_window",
-    "close_deadline",
-    "open_bounty",
-    "open_challenge",
-    "resolve_rejected",
-    "resolve_upheld",
-    "settle",
-    "submit_candidate",
-    "verify_accept",
-    "verify_reject"
-  ],
-  "required_gates": [
-    "canonical_esso_ir",
-    "z3_one_step_inductiveness",
-    "named_disaster_mutants_killed_by_counterexample",
-    "post_window_challenge_resolvability_trace",
-    "complete_reachable_mounted_runtime_refinement",
-    "source_hash_binding"
-  ],
-  "nonclaims": [
-    "arbitrary_market_cardinality",
-    "unbounded_liveness_or_fairness",
-    "verifier_semantic_correctness",
-    "production_datastore_linearizability",
-    "chain_or_token_refinement"
   ]
 }
