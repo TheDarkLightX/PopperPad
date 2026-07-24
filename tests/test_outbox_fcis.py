@@ -175,6 +175,33 @@ def test_missing_handler_keeps_effect_pending(tmp_path: Path) -> None:
     assert len(outbox.pending().effects) == 1
 
 
+def test_corrupt_authority_log_blocks_external_delivery(tmp_path: Path) -> None:
+    pad = PopperPad(root=tmp_path / "pad")
+    pad.init()
+    pad.commit_values(
+        outbox=(("notify", {"value": 1}),),
+        created_at="2026-07-24T00:00:00Z",
+    )
+    outbox = Outbox(log=pad.log, journal_path=pad.root / "outbox-acks.jsonl")
+    outbox.init()
+
+    rows = [json.loads(line) for line in pad.log.path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["outbox"][0]["payload"]["value"] = 999
+    pad.log.path.write_text(json.dumps(rows[0]) + "\n", encoding="utf-8")
+    calls: list[str] = []
+
+    def handler(effect_id: str, _payload: dict) -> dict:
+        calls.append(effect_id)
+        return {"id": effect_id}
+
+    with pytest.raises(ValidationError, match="record_hash mismatch"):
+        outbox.deliver_pending(
+            handlers={"notify": RegisteredHandler("notify-handler/v1", handler)},
+            delivered_at=lambda: "2026-07-24T00:01:00Z",
+        )
+    assert calls == []
+
+
 def test_ack_journal_corruption_is_detected(tmp_path: Path) -> None:
     pad = PopperPad(root=tmp_path / "pad")
     pad.init()

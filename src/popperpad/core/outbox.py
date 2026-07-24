@@ -5,14 +5,14 @@ from dataclasses import dataclass
 
 from .codec import canonical_hash
 from .result import Reject
-from .values import FrozenDict, JsonValue, freeze_json
+from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True, slots=True)
-class CommittedEffect:
+class CommittedEffect(DeeplyImmutable):
     effect_id: str
     commit_record_hash: str
     kind: str
@@ -20,7 +20,7 @@ class CommittedEffect:
 
 
 @dataclass(frozen=True, slots=True)
-class DeliveryAcknowledgement:
+class DeliveryAcknowledgement(DeeplyImmutable):
     effect_id: str
     commit_record_hash: str
     handler_id: str
@@ -51,18 +51,18 @@ class DeliveryAcknowledgement:
 
 
 @dataclass(frozen=True, slots=True)
-class OutboxSnapshot:
+class OutboxSnapshot(DeeplyImmutable):
     effects: tuple[CommittedEffect, ...]
     acknowledgements: tuple[DeliveryAcknowledgement, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class PendingOutbox:
+class PendingOutbox(DeeplyImmutable):
     effects: tuple[CommittedEffect, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class DeliveryAttempt:
+class DeliveryAttempt(DeeplyImmutable):
     effect_id: str
     status: str  # delivered|failed|missing_handler|already_delivered
     acknowledgement_hash: str = ""

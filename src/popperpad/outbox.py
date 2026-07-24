@@ -212,6 +212,7 @@ class Outbox:
         self.journal.init()
 
     def committed_effects(self) -> tuple[CommittedEffect, ...]:
+        self.log.verify()
         effects: list[CommittedEffect] = []
         for record in self.log.iter_raw_records():
             if record.get("schema") != "popperpad/log_record/v2" or record.get("op") != "commit_bundle":

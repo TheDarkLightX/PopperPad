@@ -184,6 +184,12 @@ class AppendOnlyLog:
     def _append_line_atomically_unlocked(self, obj: Mapping[str, Any]) -> None:
         existing = self.path.read_bytes() if self.path.exists() else b""
         require(not existing or existing.endswith(b"\n"), "log corruption: final record is incomplete")
+        existing_records = (
+            json.loads(line)
+            for line in existing.decode("utf-8").splitlines()
+            if line.strip()
+        )
+        self._verify_records(existing_records)
         next_bytes = existing + canonical_json_bytes(obj)
 
         descriptor, temporary_name = tempfile.mkstemp(
@@ -233,8 +239,12 @@ class AppendOnlyLog:
                 yield record
 
     def verify(self) -> None:
+        self._verify_records(self.iter_raw_records())
+
+    @staticmethod
+    def _verify_records(records: Iterator[Mapping[str, Any]]) -> None:
         previous = ""
-        for index, record in enumerate(self.iter_raw_records(), start=1):
+        for index, record in enumerate(records, start=1):
             schema = record.get("schema")
             require(schema in {_LOG_SCHEMA_V1, _LOG_SCHEMA_V2}, f"log corruption: bad schema at line {index}")
             record_hash = record.get("record_hash")

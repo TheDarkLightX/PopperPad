@@ -22,7 +22,10 @@ claim requires all of the following properties together:
 4. **Integer-only committed quantities.** Money, resource budgets, weights,
    durations, and protocol counters use integer atoms or explicitly encoded
    decimal/rational values. Binary floating point is not part of committed core
-   state.
+   state. The legacy `popperpad.canonical.canonical_json_bytes` surface remains
+   byte-compatible with existing v1 pads, including their finite JSON floats;
+   legacy float-bearing objects continue through v1 publication, while new FCIS
+   commitments use the integer-only `popperpad.core.codec` surface.
 5. **Canonical, domain-separated commitments.** The codec fixes versions, tags,
    normalization, ordering, and hash domains independently of Python object
    layout.
