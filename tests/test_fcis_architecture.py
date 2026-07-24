@@ -33,6 +33,7 @@ CORE_MODULES = (
     "popperpad.core.commit",
     "popperpad.core.evidence",
     "popperpad.core.graph",
+    "popperpad.core.market",
     "popperpad.core.mechanism",
     "popperpad.core.outbox",
     "popperpad.core.recipe",
