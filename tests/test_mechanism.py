@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
+from popperpad.core.mechanism import (
+    CertificateCase as CoreCertificateCase,
+    EarnPath as CoreEarnPath,
+    ResourceBudget as CoreResourceBudget,
+    TreasuryEpoch as CoreTreasuryEpoch,
+    TruthBoundaryInputs as CoreTruthBoundaryInputs,
+)
 from popperpad.mechanism import (
     Amount,
     CertificateCase,
@@ -80,14 +89,27 @@ def test_certificate_payable_requires_all_four_guards() -> None:
 
 
 def test_amount_rejects_inexact_or_negative_state() -> None:
-    import pytest
-
     with pytest.raises(TypeError):
         Amount(1.5)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         Amount(True)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         Amount(-1)
+
+
+@pytest.mark.parametrize(
+    "factory",
+    (
+        lambda: CoreTreasuryEpoch("e", 100, A(0), A(0), A(0)),
+        lambda: CoreResourceBudget("b", A(1), A(0), A(0), A(0), A(0), 0),
+        lambda: CoreEarnPath("p", A(1), 0),
+        lambda: CoreCertificateCase("c", 1, True, True, False),
+        lambda: CoreTruthBoundaryInputs(stake_changed=1),
+    ),
+)
+def test_core_mechanism_values_reject_wrong_immutable_runtime_types(factory: object) -> None:
+    with pytest.raises(TypeError):
+        factory()  # type: ignore[operator]
 
 
 def test_truth_boundary_stake_alone_never_changes_status() -> None:

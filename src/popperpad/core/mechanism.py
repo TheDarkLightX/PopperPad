@@ -13,6 +13,15 @@ class TreasuryEpoch:
     committed_outflows: Amount
     reserve_requirement: Amount
 
+    def __post_init__(self) -> None:
+        _require_name("name", self.name)
+        _require_amounts(
+            starting_balance=self.starting_balance,
+            inflows=self.inflows,
+            committed_outflows=self.committed_outflows,
+            reserve_requirement=self.reserve_requirement,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ResourceBudget:
@@ -24,12 +33,30 @@ class ResourceBudget:
     verifier: Amount
     retrieval: Amount
 
+    def __post_init__(self) -> None:
+        _require_name("budget_id", self.budget_id)
+        _require_amounts(
+            funded=self.funded,
+            compute=self.compute,
+            storage=self.storage,
+            api=self.api,
+            verifier=self.verifier,
+            retrieval=self.retrieval,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EarnPath:
     name: str
     earned_credits: Amount
     minimum_agent_run_cost: Amount
+
+    def __post_init__(self) -> None:
+        _require_name("name", self.name)
+        _require_amounts(
+            earned_credits=self.earned_credits,
+            minimum_agent_run_cost=self.minimum_agent_run_cost,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +67,15 @@ class CertificateCase:
     certificate_available: bool
     challenge_failed: bool
 
+    def __post_init__(self) -> None:
+        _require_name("name", self.name)
+        _require_amounts(payment_offered=self.payment_offered)
+        _require_bools(
+            verifier_accepted=self.verifier_accepted,
+            certificate_available=self.certificate_available,
+            challenge_failed=self.challenge_failed,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TruthBoundaryInputs:
@@ -47,6 +83,31 @@ class TruthBoundaryInputs:
     verifier_result_changed: bool = False
     local_status_inputs_changed: bool = False
     status_changed: bool = False
+
+    def __post_init__(self) -> None:
+        _require_bools(
+            stake_changed=self.stake_changed,
+            verifier_result_changed=self.verifier_result_changed,
+            local_status_inputs_changed=self.local_status_inputs_changed,
+            status_changed=self.status_changed,
+        )
+
+
+def _require_name(field_name: str, value: object) -> None:
+    if type(value) is not str or not value:
+        raise TypeError(f"{field_name} must be a non-empty string")
+
+
+def _require_amounts(**values: object) -> None:
+    for field_name, value in values.items():
+        if type(value) is not Amount:
+            raise TypeError(f"{field_name} must be an Amount")
+
+
+def _require_bools(**values: object) -> None:
+    for field_name, value in values.items():
+        if type(value) is not bool:
+            raise TypeError(f"{field_name} must be a bool")
 
 
 def treasury_margin(epoch: TreasuryEpoch) -> int:

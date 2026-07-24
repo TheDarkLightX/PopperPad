@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from enum import Enum
 from typing import Any, Generic, TypeAlias, TypeVar, cast
 
 
@@ -98,17 +97,17 @@ def thaw_json(value: JsonValue) -> Any:
 
 
 def is_deeply_immutable(value: Any, *, _seen: frozenset[int] = frozenset()) -> bool:
-    if value is None or isinstance(value, (bool, int, str, bytes, Enum, Amount)):
+    if value is None or type(value) in (bool, int, str, bytes, Amount):
         return True
     value_id = id(value)
     if value_id in _seen:
         return False
     seen = _seen | {value_id}
-    if isinstance(value, tuple):
+    if type(value) is tuple:
         return all(is_deeply_immutable(child, _seen=seen) for child in value)
-    if isinstance(value, frozenset):
+    if type(value) is frozenset:
         return all(is_deeply_immutable(child, _seen=seen) for child in value)
-    if isinstance(value, FrozenDict):
+    if type(value) is FrozenDict:
         return all(is_deeply_immutable(child, _seen=seen) for _key, child in value.items_tuple())
     if is_dataclass(value) and not isinstance(value, type):
         params = getattr(type(value), "__dataclass_params__", None)
