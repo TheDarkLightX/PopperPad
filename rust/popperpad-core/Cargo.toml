@@ -1,0 +1,21 @@
+[package]
+name = "popperpad-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+description = "Hardened FCIS parity kernel for PopperPad"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+sha2 = "0.10"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
