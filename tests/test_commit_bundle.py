@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,23 @@ def test_log_failure_leaves_only_unreferenced_cas_bytes(tmp_path: Path, monkeypa
     report = pad.doctor(strict=False)
     assert report.ok
     assert report.stats["objects"] == 0
+
+
+def test_corrupt_predecessor_blocks_later_authoritative_append(tmp_path: Path) -> None:
+    pad = PopperPad(root=tmp_path / "pad")
+    pad.init()
+    pad.put_object(_domain("first"))
+
+    records = [json.loads(line) for line in pad.log.path.read_text(encoding="utf-8").splitlines()]
+    records[0]["commit_root"] = "sha256:" + "0" * 64
+    pad.log.path.write_text(
+        "".join(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="record_hash mismatch"):
+        pad.put_object(_domain("second"))
+    assert len(list(pad.log.iter_raw_records())) == 1
 
 
 def test_mixed_legacy_and_v2_records_verify_as_one_hash_chain(tmp_path: Path) -> None:

@@ -18,6 +18,16 @@ from .schemas import SCHEMA_CHECKPOINT_V1, SCHEMA_HYPOTHESIS_V1
 from .validate import validate_object
 
 
+def _contains_legacy_float(value: Any) -> bool:
+    if isinstance(value, float):
+        return True
+    if isinstance(value, Mapping):
+        return any(_contains_legacy_float(child) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_legacy_float(child) for child in value)
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class AddResult:
     obj_ref: str
@@ -124,8 +134,27 @@ class PopperPad:
             require(stored.ref == item.ref, "planned blob ref differs from staged CAS ref")
 
     def put_object(self, obj: Mapping[str, Any]) -> AddResult:
+        if _contains_legacy_float(obj):
+            return self._put_legacy_float_object(obj)
         committed = self.commit_values(objects=(obj,))
         return AddResult(obj_ref=committed.object_refs[0], record_hash=committed.record_hash)
+
+    def _put_legacy_float_object(self, obj: Mapping[str, Any]) -> AddResult:
+        """Preserve the v1 finite-float format without weakening v2 commits."""
+
+        validate_object(obj)
+        put = self.cas.put_json(dict(obj))
+        record = {
+            "schema": "popperpad/log_record/v1",
+            "op": "add_object",
+            "created_at": utc_now_iso(),
+            "obj_ref": put.ref,
+            "obj_schema": str(obj.get("schema")),
+        }
+        record_hash = self.log.append(record).record_hash
+        if self._index_built:
+            self._index.on_record(record)
+        return AddResult(obj_ref=put.ref, record_hash=record_hash)
 
     def put_blob(self, data: bytes, *, media_type: str = "application/octet-stream") -> AddResult:
         committed = self.commit_values(blobs=((bytes(data), str(media_type)),))
