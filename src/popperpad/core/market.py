@@ -891,6 +891,18 @@ def _validate_market_state(value: object) -> str | None:
         return "payable_submission_ids must be a tuple of valid ids"
     if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
         return "payable_submission_ids must be unique"
+
+    submissions_by_id = {
+        submission.submission_id: submission for submission in state.submissions
+    }
+    if len(submissions_by_id) != len(state.submissions):
+        return "submission ids must be unique"
+    for submission_id in state.payable_submission_ids:
+        submission = submissions_by_id.get(submission_id)
+        if submission is None:
+            return "payable_submission_ids must reference existing submissions"
+        if submission.status is not SubmissionStatus.VERIFIED:
+            return "payable_submission_ids must reference verified submissions"
     if state.settlement_ref is not None and (
         not isinstance(state.settlement_ref, str) or not state.settlement_ref
     ):
