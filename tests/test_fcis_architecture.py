@@ -18,6 +18,7 @@ CORE_MODULES = (
     "popperpad.core.check",
     "popperpad.core.codec",
     "popperpad.core.commit",
+    "popperpad.core.evidence",
     "popperpad.core.mechanism",
     "popperpad.core.recipe",
     "popperpad.core.result",
@@ -166,3 +167,11 @@ def test_core_import_graph_contains_no_effect_authority() -> None:
                 assert not any(name == prefix or name.startswith(prefix + ".") for prefix in FORBIDDEN_POPPERPAD_IMPORTS), (
                     f"shell import {name} in {source_path.name}"
                 )
+
+
+def test_check_engine_does_not_reconstruct_or_individually_publish_semantic_objects() -> None:
+    engine_path = Path(importlib.import_module("popperpad.engine").__file__)
+    source = engine_path.read_text(encoding="utf-8")
+    assert ".put_object(" not in source
+    assert "plan_check_objects(" in source
+    assert ".commit_values(" in source
