@@ -27,10 +27,10 @@ def _work_order() -> dict[str, object]:
         "payout_condition": "valid_counterexample",
         "challenge_window_seconds": 604800,
         "scoring": {
-            "novelty_weight": 0.30,
-            "minimality_weight": 0.20,
-            "severity_weight": 0.30,
-            "reproducibility_weight": 0.20,
+            "novelty_weight_bps": 3000,
+            "minimality_weight_bps": 2000,
+            "severity_weight_bps": 3000,
+            "reproducibility_weight_bps": 2000,
         },
     }
 
@@ -59,7 +59,7 @@ def test_market_work_order_rejects_negative_scoring_weight() -> None:
     from popperpad.validate import validate_object
 
     obj = _work_order()
-    obj["scoring"] = {"novelty_weight": -0.1}
+    obj["scoring"] = {"novelty_weight_bps": -1}
     with pytest.raises(ValueError, match="scoring values"):
         validate_object(obj)
 
