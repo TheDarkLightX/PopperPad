@@ -10,8 +10,8 @@ from .engine import CheckEngine, RunResult
 from .graph import StatusResult, compute_status, find_transfer_paths, iter_objects_by_schema
 from .index import PadIndex
 from .log import AppendOnlyLog, utc_now_iso
-from .refs import is_ref, require, require_ref
-from .schemas import SCHEMA_CHECKPOINT_V1, SCHEMA_EDGE_V1
+from .refs import is_ref, require
+from .schemas import SCHEMA_CHECKPOINT_V1, SCHEMA_HYPOTHESIS_V1
 from .validate import validate_object
 
 
@@ -91,10 +91,64 @@ class PopperPad:
         return self._engine.run_hypothesis(hyp_ref, context_ref=context_ref, mode=mode)
 
     def status(self, hyp_ref: str, *, context_ref: str | None) -> StatusResult:
+        hypothesis = self.get_object(hyp_ref)
+        require(
+            isinstance(hypothesis, Mapping) and hypothesis.get("schema") == SCHEMA_HYPOTHESIS_V1,
+            "ref is not a hypothesis",
+        )
+        accepted_recipe_refs = frozenset(
+            str(ref) for ref in hypothesis.get("check_recipe_refs", []) if is_ref(ref)
+        )
         self._ensure_index()
         edge_refs = self._index.edges_by_target(hyp_ref, object_lookup=self.get_object)
         edges = [(ref, self.get_object(ref)) for ref in edge_refs]
-        return compute_status(edges, hyp_ref=hyp_ref, context_ref=context_ref)
+        objects = self._load_status_objects(edges)
+        return compute_status(
+            edges,
+            hyp_ref=hyp_ref,
+            context_ref=context_ref,
+            objects=objects,
+            accepted_recipe_refs=accepted_recipe_refs,
+        )
+
+    def _load_status_objects(
+        self, edges: Iterable[tuple[str, Mapping[str, Any]]]
+    ) -> dict[str, Mapping[str, Any]]:
+        """Load the evidence and recipe view consumed by the pure status core.
+
+        Missing, malformed, or unreadable references are omitted so status
+        derivation fails closed instead of treating an assertion as evidence.
+        """
+        objects: dict[str, Mapping[str, Any]] = {}
+        for _edge_ref, edge in edges:
+            evidence_refs = edge.get("evidence_refs", [])
+            if not isinstance(evidence_refs, (list, tuple)) or isinstance(evidence_refs, (str, bytes)):
+                continue
+            for raw_evidence_ref in evidence_refs:
+                if not is_ref(raw_evidence_ref):
+                    continue
+                evidence_ref = str(raw_evidence_ref)
+                try:
+                    evidence = self.get_object(evidence_ref)
+                except Exception:
+                    continue
+                if not isinstance(evidence, Mapping):
+                    continue
+                objects[evidence_ref] = evidence
+
+                recipe_ref = evidence.get("recipe_ref")
+                if not is_ref(recipe_ref):
+                    continue
+                recipe_key = str(recipe_ref)
+                if recipe_key in objects:
+                    continue
+                try:
+                    recipe = self.get_object(recipe_key)
+                except Exception:
+                    continue
+                if isinstance(recipe, Mapping):
+                    objects[recipe_key] = recipe
+        return objects
 
     def transfer_paths(
         self,
