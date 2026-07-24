@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from popperpad.canonical import canonical_hash, canonical_json_bytes, stable_sha256
+from popperpad.canonical import canonical_hash, canonical_json_bytes, sha256_bytes, stable_sha256
 from popperpad.graph import compute_status, find_transfer_paths
 from popperpad.refs import ClaimState, Ref, RunMode, ValidationError, is_ref
 
@@ -168,8 +168,10 @@ def test_transfer_paths_pure_bfs_with_equivalence() -> None:
 
 def test_canonical_round_trip_is_integer_only_and_deterministic() -> None:
     obj = {"b": [1, 2], "a": {"y": True, "x": None}, "n": 35}
-    assert canonical_json_bytes(obj) == canonical_json_bytes(obj)
-    assert stable_sha256(obj) == canonical_hash("canonical-json/v2", obj)
+    encoded = canonical_json_bytes(obj)
+    assert encoded == canonical_json_bytes(obj)
+    assert stable_sha256(obj) == sha256_bytes(encoded)
+    assert canonical_hash("canonical-json/v2", obj) != stable_sha256(obj)
     with pytest.raises(TypeError, match="floating-point"):
         canonical_json_bytes({"n": 3.5})
 
