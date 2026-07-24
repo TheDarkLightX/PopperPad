@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import pytest
 
@@ -569,3 +569,30 @@ def test_terms_reject_illegal_states_at_construction() -> None:
             accepted_recipe_refs=frozenset({R("c")}),
             accepted_verifier_refs=frozenset({R("d")}),
         )
+
+
+def test_payable_state_rejects_unverified_submission_ids() -> None:
+    payable = apply_market_command(
+        verified_state(),
+        AdvanceBounty("cmd-advance-malformed-payable", 1_101),
+        policy(),
+    )
+    assert isinstance(payable, Accept)
+    rejected_submission = replace(
+        payable.next_state.submissions[0],
+        status=SubmissionStatus.REJECTED,
+    )
+    malformed = replace(payable.next_state, submissions=(rejected_submission,))
+    decision = apply_market_command(
+        malformed,
+        SettleBounty(
+            "cmd-malformed-settle",
+            "chain:tx:malformed",
+            (Payout("did:example:refuter", "submission-1", Amount(1_000)),),
+            1_102,
+        ),
+        policy(),
+    )
+    assert isinstance(decision, Reject)
+    assert decision.code == "INVALID_STATE"
+    assert "verified submissions" in decision.details["reason"]
