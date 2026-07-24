@@ -126,3 +126,29 @@ Run checks:
 popperpad prove  --pad ./pad <hypothesis_ref> --context <context_ref>
 popperpad refute --pad ./pad <hypothesis_ref> --context <context_ref>
 ```
+
+Inspect:
+
+```bash
+popperpad status  --pad ./pad <hypothesis_ref> --context <context_ref>
+popperpad doctor  --pad ./pad
+popperpad checkpoint --pad ./pad
+popperpad --pad ./pad gamification-leaderboard --point-kind xp
+```
+
+Blobs (large artifacts):
+
+```bash
+popperpad blob-put --pad ./pad --path ./artifact.bin --media-type application/octet-stream
+popperpad blob-get --pad ./pad sha256:... --out ./artifact.bin
+```
+
+Transfer:
+
+```bash
+popperpad transfer-paths --pad ./pad --from <domain_ref> --to <domain_ref> --max-depth 4
+```
+
+## Schemas
+
+JSON Schemas live under `schemas/v1/` (no runtime dependency on `jsonschema`).
