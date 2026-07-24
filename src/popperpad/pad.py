@@ -1,33 +1,55 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .cas import ContentAddressedStore
+from .canonical import canonical_json_bytes
+from .core.commit import CommitBundle, plan_commit, plan_prevalidated_commit
+from .core.result import Reject
+from .core.values import thaw_json
 from .doctor import Doctor, DoctorReport
 from .engine import CheckEngine, RunResult
 from .graph import StatusResult, compute_status, find_transfer_paths, iter_objects_by_schema
 from .index import PadIndex
 from .log import AppendOnlyLog, utc_now_iso
-from .refs import is_ref, require
+from .refs import ValidationError, is_ref, require
 from .schemas import SCHEMA_CHECKPOINT_V1, SCHEMA_HYPOTHESIS_V1
 from .validate import validate_object
 
 
-@dataclass(frozen=True)
+def _contains_legacy_float(value: Any) -> bool:
+    if isinstance(value, float):
+        return True
+    if isinstance(value, Mapping):
+        return any(_contains_legacy_float(child) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_legacy_float(child) for child in value)
+    return False
+
+
+@dataclass(frozen=True, slots=True)
 class AddResult:
     obj_ref: str
     record_hash: str
 
 
-class PopperPad:
-    """Standalone PopperPad library facade.
+@dataclass(frozen=True, slots=True)
+class CommitResult:
+    commit_root: str
+    record_hash: str
+    object_refs: tuple[str, ...]
+    blob_refs: tuple[str, ...]
+    effect_ids: tuple[str, ...]
 
-    Composes a content-addressed store, an append-only hash-chained log, a
-    derived semantic graph, and an incremental index. Cohesive behaviour lives
-    in :mod:`engine`, :mod:`graph`, :mod:`doctor`, and :mod:`index`; this class
-    wires them together and exposes the public pad API.
+
+class PopperPad:
+    """Standalone PopperPad imperative shell.
+
+    Pure modules construct immutable values, decisions, and commit plans. This
+    facade owns filesystem/CAS/log authority and interprets only those plans.
     """
 
     def __init__(self, *, root: Path):
@@ -48,7 +70,124 @@ class PopperPad:
             self._index.rebuild_from_log(self.log.iter_records())
             self._index_built = True
 
+    def commit_values(
+        self,
+        *,
+        objects: tuple[Mapping[str, Any], ...] = (),
+        blobs: tuple[tuple[bytes, str], ...] = (),
+        outbox: tuple[tuple[str, Mapping[str, Any]], ...] = (),
+        evidence_root: str = "",
+        created_at: str | None = None,
+        policy_version: str = "popperpad-policy/v1",
+        core_version: str = "popperpad-core/v1",
+    ) -> CommitResult:
+        """Validate, plan, and atomically authorize one immutable commit bundle.
+
+        Content-addressed bytes are written before the compare-and-swap record.
+        A crash or conflict can therefore leave unreferenced CAS bytes, but it
+        cannot expose a partial authoritative state: the v2 log record is the
+        single publication point.
+        """
+
+        owned_objects = tuple(dict(obj) for obj in objects)
+        for obj in owned_objects:
+            validate_object(obj)
+
+        expected_head = self.log.head()
+        planned = plan_commit(
+            expected_head=expected_head,
+            created_at=created_at or utc_now_iso(),
+            objects=owned_objects,
+            blobs=tuple((bytes(payload), str(media_type)) for payload, media_type in blobs),
+            outbox=tuple((str(kind), dict(payload)) for kind, payload in outbox),
+            evidence_root=evidence_root,
+            policy_version=policy_version,
+            core_version=core_version,
+        )
+        if isinstance(planned, Reject):
+            details = thaw_json(planned.details)
+            raise ValidationError(f"{planned.code}: {details}")
+
+        return self._publish_commit(planned, expected_head=expected_head)
+
+    def commit_prevalidated_values(
+        self,
+        *,
+        objects: tuple[tuple[bytes, str], ...] = (),
+        blobs: tuple[tuple[bytes, str], ...] = (),
+        evidence_root: str = "",
+        created_at: str | None = None,
+        policy_version: str = "popperpad-import-policy/v1",
+        core_version: str = "popperpad-core/v1",
+    ) -> CommitResult:
+        """Atomically publish exact legacy bytes after full shell validation."""
+
+        owned_objects: list[tuple[bytes, str]] = []
+        for raw_payload, raw_schema in objects:
+            require(isinstance(raw_payload, bytes), "prevalidated object payload must be bytes")
+            require(isinstance(raw_schema, str) and raw_schema, "object schema must be non-empty")
+            payload = bytes(raw_payload)
+            parsed = json.loads(payload.decode("utf-8"))
+            require(isinstance(parsed, Mapping), "prevalidated object must decode to a mapping")
+            validate_object(parsed)
+            require(parsed.get("schema") == raw_schema, "object schema differs from validated payload")
+            require(canonical_json_bytes(parsed) == payload, "object payload is not legacy canonical JSON")
+            owned_objects.append((payload, raw_schema))
+
+        expected_head = self.log.head()
+        planned = plan_prevalidated_commit(
+            expected_head=expected_head,
+            created_at=created_at or utc_now_iso(),
+            objects=tuple(owned_objects),
+            blobs=tuple((bytes(payload), str(media_type)) for payload, media_type in blobs),
+            evidence_root=evidence_root,
+            policy_version=policy_version,
+            core_version=core_version,
+        )
+        if isinstance(planned, Reject):
+            details = thaw_json(planned.details)
+            raise ValidationError(f"{planned.code}: {details}")
+        return self._publish_commit(planned, expected_head=expected_head)
+
+    def _publish_commit(self, planned: CommitBundle, *, expected_head: str) -> CommitResult:
+        """Stage exact bytes, then make one prepared record authoritative."""
+
+        self._stage_commit_payloads(planned)
+        record = thaw_json(planned.record)
+        require(isinstance(record, Mapping), "planned commit record must be an object")
+        append = self.log.append_prepared(record, expected_head=expected_head)
+
+        if self._index_built:
+            for logical_record in planned.logical_records():
+                plain = thaw_json(logical_record)
+                if isinstance(plain, Mapping):
+                    self._index.on_record(plain)
+
+        return CommitResult(
+            commit_root=planned.commit_root,
+            record_hash=append.record_hash,
+            object_refs=tuple(item.ref for item in planned.objects),
+            blob_refs=tuple(item.ref for item in planned.blobs),
+            effect_ids=tuple(effect.effect_id for effect in planned.outbox),
+        )
+
+    def _stage_commit_payloads(self, planned: CommitBundle) -> None:
+        for item in planned.objects:
+            stored = self.cas.put_bytes(item.payload)
+            require(stored.ref == item.ref, "planned object ref differs from staged CAS ref")
+        for item in planned.blobs:
+            stored = self.cas.put_bytes(item.payload)
+            require(stored.ref == item.ref, "planned blob ref differs from staged CAS ref")
+
     def put_object(self, obj: Mapping[str, Any]) -> AddResult:
+        if _contains_legacy_float(obj):
+            return self._put_legacy_float_object(obj)
+        committed = self.commit_values(objects=(obj,))
+        return AddResult(obj_ref=committed.object_refs[0], record_hash=committed.record_hash)
+
+    def _put_legacy_float_object(self, obj: Mapping[str, Any]) -> AddResult:
+        """Preserve the v1 finite-float format without weakening v2 commits."""
+
         validate_object(obj)
         put = self.cas.put_json(dict(obj))
         record = {
@@ -64,17 +203,8 @@ class PopperPad:
         return AddResult(obj_ref=put.ref, record_hash=record_hash)
 
     def put_blob(self, data: bytes, *, media_type: str = "application/octet-stream") -> AddResult:
-        put = self.cas.put_bytes(bytes(data))
-        record_hash = self.log.append(
-            {
-                "schema": "popperpad/log_record/v1",
-                "op": "add_blob",
-                "created_at": utc_now_iso(),
-                "blob_ref": put.ref,
-                "media_type": str(media_type),
-            }
-        ).record_hash
-        return AddResult(obj_ref=put.ref, record_hash=record_hash)
+        committed = self.commit_values(blobs=((bytes(data), str(media_type)),))
+        return AddResult(obj_ref=committed.blob_refs[0], record_hash=committed.record_hash)
 
     def get_object(self, ref: str) -> Any:
         require(is_ref(ref), "invalid ref")
@@ -114,11 +244,8 @@ class PopperPad:
     def _load_status_objects(
         self, edges: Iterable[tuple[str, Mapping[str, Any]]]
     ) -> dict[str, Mapping[str, Any]]:
-        """Load the evidence and recipe view consumed by the pure status core.
+        """Load the immutable evidence/recipe view consumed by the pure status core."""
 
-        Missing, malformed, or unreadable references are omitted so status
-        derivation fails closed instead of treating an assertion as evidence.
-        """
         objects: dict[str, Mapping[str, Any]] = {}
         for _edge_ref, edge in edges:
             evidence_refs = edge.get("evidence_refs", [])
@@ -159,10 +286,10 @@ class PopperPad:
         require_validated: bool = False,
     ) -> list[dict[str, Any]]:
         self._ensure_index()
-        adj = self._index.semantic_adjacency(object_lookup=self.get_object)
-        edge_refs = set()
-        for refs in adj.values():
-            edge_refs.update(ref for ref, _ in refs)
+        adjacency = self._index.semantic_adjacency(object_lookup=self.get_object)
+        edge_refs: set[str] = set()
+        for refs in adjacency.values():
+            edge_refs.update(ref for ref, _target in refs)
         edges = [(ref, self.get_object(ref)) for ref in edge_refs]
         return find_transfer_paths(
             edges,

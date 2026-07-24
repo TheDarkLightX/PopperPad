@@ -24,7 +24,8 @@ claim requires all of the following properties together:
    decimal/rational values. Binary floating point is not part of committed core
    state. The legacy `popperpad.canonical.canonical_json_bytes` surface remains
    byte-compatible with existing v1 pads, including their finite JSON floats;
-   new FCIS commitments use the integer-only `popperpad.core.codec` surface.
+   legacy float-bearing objects continue through v1 publication, while new FCIS
+   commitments use the integer-only `popperpad.core.codec` surface.
 5. **Canonical, domain-separated commitments.** The codec fixes versions, tags,
    normalization, ordering, and hash domains independently of Python object
    layout.

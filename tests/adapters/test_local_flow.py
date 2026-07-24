@@ -20,7 +20,7 @@ from popperpad.adapters.bundle import export_bundle
 from popperpad.canonical import canonical_json_bytes, sha256_bytes
 from popperpad.pad import PopperPad
 from popperpad.refs import Ref
-from popperpad.schemas import SCHEMA_DOMAIN_V1
+from popperpad.schemas import SCHEMA_DOMAIN_V1, SCHEMA_MARKET_WORK_ORDER_V1
 
 
 def _pad_with_domain(tmp_path: Path) -> tuple[PopperPad, str]:
@@ -36,6 +36,7 @@ def test_gather_prepare_export_publish_anchor_round_trip(tmp_path: Path) -> None
     bundle, objects, blobs = gather_from_pad(pad, object_refs=[obj_ref], entry_refs=[obj_ref], bundle_id="b1")
     manifest = build_manifest(bundle, created_at="2026-01-01T00:00:00Z")
     prepared = prepare(bundle, manifest, objects, blobs)
+    assert prepared.canonicalization == "popperpad-json-c14n-v1"
     assert prepared.object_count == 1
     assert prepared.bundle_root == bundle_root(manifest)
 
@@ -89,6 +90,49 @@ def test_import_round_trip_into_new_pad(tmp_path: Path) -> None:
     assert report.status == "imported"
     assert obj_ref in report.imported_object_refs
     assert target.get_object(obj_ref)["domain_id"] == "A"
+    target.doctor(strict=True)
+
+
+def test_import_preserves_legacy_float_object_in_one_atomic_record(tmp_path: Path) -> None:
+    legacy = {
+        "schema": SCHEMA_MARKET_WORK_ORDER_V1,
+        "task_type": "counterexample",
+        "claim_ref": "sha256:" + "a" * 64,
+        "context_ref": "sha256:" + "b" * 64,
+        "accepted_recipe_refs": ["sha256:" + "c" * 64],
+        "accepted_verifier_refs": ["sha256:" + "d" * 64],
+        "max_payout": "1000 PPAD",
+        "min_bond": "25 PPAD",
+        "deadline": "2026-12-31T23:59:59Z",
+        "payout_condition": "valid_counterexample",
+        "challenge_window_seconds": 604800,
+        "scoring": {"novelty_weight": 0.30},
+    }
+    payload = canonical_json_bytes(legacy)
+    obj_ref = sha256_bytes(payload)
+    bundle = Bundle(
+        bundle_id="legacy-float",
+        object_refs=(Ref(obj_ref),),
+        blob_refs=(),
+        entry_refs=(Ref(obj_ref),),
+        previous_bundle_refs=(),
+    )
+    bundle_dir = tmp_path / "legacy-bundle"
+    export_bundle(
+        bundle,
+        bundle_dir,
+        objects={obj_ref: payload},
+        blobs={},
+        created_at="2026-07-24T00:00:00Z",
+    )
+
+    target = PopperPad(root=tmp_path / "legacy-target")
+    target.init()
+    report = import_bundle(bundle_dir, target, TrustPolicy(require_signatures=False))
+    assert report.status == "imported"
+    assert report.imported_object_refs == (obj_ref,)
+    assert target.get_object(obj_ref) == legacy
+    assert len(list(target.log.iter_raw_records())) == 1
     target.doctor(strict=True)
 
 

@@ -27,6 +27,7 @@ from popperpad.core.recipe import ProcessObservation, RecipePlan, evaluate_obser
 CORE_MODULES = (
     "popperpad.core.check",
     "popperpad.core.codec",
+    "popperpad.core.commit",
     "popperpad.core.mechanism",
     "popperpad.core.recipe",
     "popperpad.core.result",
