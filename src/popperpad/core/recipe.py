@@ -5,24 +5,39 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .result import Reject
-from .values import FrozenDict, JsonValue, freeze_json
+from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 @dataclass(frozen=True, slots=True)
-class InputSpec:
+class InputSpec(DeeplyImmutable):
     kind: str  # ref|text|binding
     value: str
 
+    def __post_init__(self) -> None:
+        if type(self.kind) is not str or self.kind not in {"ref", "text", "binding"}:
+            raise ValueError("input kind must be ref, text, or binding")
+        _require_exact_string("value", self.value)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class ArtifactPlan:
+class ArtifactPlan(DeeplyImmutable):
     path: str
     max_bytes: int | None = None
     media_type: str = "application/octet-stream"
 
+    def __post_init__(self) -> None:
+        _require_exact_string("path", self.path)
+        if self.max_bytes is not None and (
+            type(self.max_bytes) is not int or self.max_bytes <= 0
+        ):
+            raise TypeError("max_bytes must be null or a positive integer")
+        _require_exact_string("media_type", self.media_type)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class Expectations:
+class Expectations(DeeplyImmutable):
     exit_code: int = 0
     stdout_contains: str | None = None
     stderr_contains: str | None = None
@@ -33,9 +48,27 @@ class Expectations:
     files_exist: tuple[str, ...] = ()
     files_not_exist: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if type(self.exit_code) is not int:
+            raise TypeError("exit_code must be an integer")
+        for field_name in (
+            "stdout_contains",
+            "stderr_contains",
+            "stdout_not_contains",
+            "stderr_not_contains",
+            "stdout_regex",
+            "stderr_regex",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and type(value) is not str:
+                raise TypeError(f"{field_name} must be null or a string")
+        _require_exact_string_tuple("files_exist", self.files_exist)
+        _require_exact_string_tuple("files_not_exist", self.files_not_exist)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class RecipePlan:
+class RecipePlan(DeeplyImmutable):
     argv: tuple[str, ...]
     timeout_ms: int
     max_output_bytes: int
@@ -49,19 +82,81 @@ class RecipePlan:
     requires: tuple[str, ...]
     requires_paths: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        _require_exact_string_tuple("argv", self.argv, non_empty=True)
+        for field_name in ("timeout_ms", "max_output_bytes", "max_capture_bytes"):
+            value = getattr(self, field_name)
+            if type(value) is not int or value <= 0:
+                raise TypeError(f"{field_name} must be a positive integer")
+        if type(self.expectations) is not Expectations:
+            raise TypeError("expectations must be Expectations")
+        _require_exact_string_tuple("capture_paths", self.capture_paths)
+        if type(self.artifacts) is not FrozenDict or not all(
+            type(value) is ArtifactPlan for value in self.artifacts.values()
+        ):
+            raise TypeError("artifacts must contain ArtifactPlan values")
+        if self.stdin is not None and type(self.stdin) is not InputSpec:
+            raise TypeError("stdin must be null or InputSpec")
+        if type(self.env) is not FrozenDict or not all(
+            value is None or type(value) is str for value in self.env.values()
+        ):
+            raise TypeError("env must contain strings or null")
+        if type(self.files) is not FrozenDict or not all(
+            type(value) is InputSpec for value in self.files.values()
+        ):
+            raise TypeError("files must contain InputSpec values")
+        _require_exact_string_tuple("requires", self.requires)
+        _require_exact_string_tuple("requires_paths", self.requires_paths)
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class ProcessObservation:
+class ProcessObservation(DeeplyImmutable):
     exit_code: int
     stdout_text: str
     stderr_text: str
     existing_paths: frozenset[str]
 
+    def __post_init__(self) -> None:
+        if type(self.exit_code) is not int:
+            raise TypeError("exit_code must be an integer")
+        _require_exact_string("stdout_text", self.stdout_text, non_empty=False)
+        _require_exact_string("stderr_text", self.stderr_text, non_empty=False)
+        if type(self.existing_paths) is not frozenset or not all(
+            type(path) is str for path in self.existing_paths
+        ):
+            raise TypeError("existing_paths must be a frozenset of strings")
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
-class RecipeEvaluation:
+class RecipeEvaluation(DeeplyImmutable):
     status: str  # PASS|FAIL
     reason: str
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not str or self.status not in {"PASS", "FAIL"}:
+            raise ValueError("status must be PASS or FAIL")
+        _require_exact_string("reason", self.reason, non_empty=False)
+        DeeplyImmutable.__post_init__(self)
+
+
+def _require_exact_string(field_name: str, value: object, *, non_empty: bool = True) -> None:
+    if type(value) is not str or (non_empty and not value):
+        suffix = "non-empty " if non_empty else ""
+        raise TypeError(f"{field_name} must be a {suffix}string")
+
+
+def _require_exact_string_tuple(
+    field_name: str,
+    value: object,
+    *,
+    non_empty: bool = False,
+) -> None:
+    if type(value) is not tuple or (non_empty and not value) or not all(
+        type(item) is str for item in value
+    ):
+        raise TypeError(f"{field_name} must be a tuple of strings")
 
 
 def _reject(code: str, *, field: str, reason: str) -> Reject:
