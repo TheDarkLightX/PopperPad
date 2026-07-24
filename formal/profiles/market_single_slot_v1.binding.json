@@ -1,0 +1,27 @@
+{
+  "schema": "popperpad/market-profile-binding/v1",
+  "profile_id": "popperpad.falsification-market.single-slot.v1",
+  "profile_hash": "sha256:pending",
+  "source_manifest_path": "formal/manifests/market_single_slot_v1.sources.json",
+  "source_manifest_hash": "sha256:pending",
+  "model_ir_hash": null,
+  "runtime_adapter_module": "popperpad.refinement.market_adapter",
+  "runtime_profile_module": "popperpad.refinement.profiles.market_single_slot_v1",
+  "runtime_input_schema": "popperpad/data-adapter-protocol/v1",
+  "runtime_result_schema": "popperpad/data-adapter-protocol/v1",
+  "scope": {
+    "bounties": 1,
+    "submissions": 1,
+    "challenges": 1,
+    "reward_atoms": 1000,
+    "submission_bond_atoms": 100,
+    "challenge_deposit_atoms": 50
+  },
+  "nonclaims": [
+    "arbitrary_market_cardinality",
+    "unbounded_liveness_or_fairness",
+    "verifier_semantic_correctness",
+    "production_datastore_linearizability",
+    "chain_or_token_refinement"
+  ]
+}

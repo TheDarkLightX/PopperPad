@@ -1,0 +1,25 @@
+{
+  "schema": "popperpad/data-adapter-source-manifest/v1",
+  "repository": "TheDarkLightX/PopperPad",
+  "commit": "pending",
+  "files": [
+    {
+      "path": "src/popperpad/core/market.py",
+      "sha256": "sha256:pending"
+    },
+    {
+      "path": "src/popperpad/core/market_invariants.py",
+      "sha256": "sha256:pending"
+    },
+    {
+      "path": "src/popperpad/core/adapter_protocol.py",
+      "sha256": "sha256:pending"
+    },
+    {
+      "path": "src/popperpad/refinement/market_adapter.py",
+      "sha256": "sha256:pending"
+    }
+  ],
+  "profile_hash": "sha256:pending",
+  "codec_version": "popperpad-json-int-v2"
+}

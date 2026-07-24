@@ -369,6 +369,260 @@ def test_invalid_input_is_deeply_immutable() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Deep immutability attack tests.
+#
+# frozen=True only blocks attribute rebinding. These tests prove that the
+# DeeplyImmutable recursive check actually catches the real attack vectors:
+#   - mutable alias injection through collections
+#   - scalar subclass attacks (bool as int, str subclass)
+#   - cyclic value graphs
+#   - post-construction mutation of source containers
+#   - mutable nested values inside FrozenDict
+#   - non-DeeplyImmutable dataclass as field value
+#   - list/dict/set anywhere in the reachable graph
+# ---------------------------------------------------------------------------
+
+
+def test_frozendict_rejects_list_value() -> None:
+    """A FrozenDict containing a list must be rejected at construction."""
+    with pytest.raises(TypeError, match="deeply immutable"):
+        FrozenDict({"evil": [1, 2, 3]})  # type: ignore[dict-item]
+
+
+def test_frozendict_rejects_dict_value() -> None:
+    """A FrozenDict containing a dict must be rejected at construction."""
+    with pytest.raises(TypeError, match="deeply immutable"):
+        FrozenDict({"evil": {"nested": "dict"}})  # type: ignore[dict-item]
+
+
+def test_frozendict_rejects_set_value() -> None:
+    """A FrozenDict containing a set must be rejected at construction."""
+    with pytest.raises(TypeError, match="deeply immutable"):
+        FrozenDict({"evil": {1, 2}})  # type: ignore[dict-item]
+
+
+def test_frozendict_defensive_copy_blocks_post_construction_mutation() -> None:
+    """Mutating the source dict after FrozenDict construction must not affect it."""
+    source: dict[str, object] = {"key": "value"}
+    fd = FrozenDict(source)
+    source["key"] = "mutated"
+    source["new_key"] = "injected"
+    assert fd["key"] == "value"
+    assert "new_key" not in fd
+
+
+def test_tuple_rejects_list_element_via_deep_check() -> None:
+    """A tuple containing a list is not deeply immutable."""
+    t = ([1, 2],)  # type: ignore[arg-type]
+    assert not is_deeply_immutable(t)
+
+
+def test_frozenset_rejects_mutable_element_via_deep_check() -> None:
+    """A frozenset containing a hashable-but-mutable object is not deeply immutable."""
+
+    class HashableButMutable:
+        __hash__ = lambda self: 0
+
+    fs = frozenset({HashableButMutable()})
+    assert not is_deeply_immutable(fs)
+
+
+def test_bool_is_not_treated_as_int_by_deep_check() -> None:
+    """bool is a subclass of int, but is_deeply_immutable accepts it as a scalar.
+    However, Amount rejects bool at construction via type(self.atoms) is not int.
+    This test verifies Amount's exact-type guard."""
+    from popperpad.core.values import Amount
+
+    with pytest.raises(TypeError, match="integer"):
+        Amount(True)  # type: ignore[arg-type]
+
+
+def test_str_subclass_is_rejected_by_frozendict_key() -> None:
+    """A str subclass as a FrozenDict key must be rejected (exact type check)."""
+
+    class EvilStr(str):
+        pass
+
+    with pytest.raises(TypeError, match="exact strings"):
+        FrozenDict({EvilStr("key"): "value"})  # type: ignore[dict-item]
+
+
+def test_int_subclass_is_rejected_by_amount() -> None:
+    """An int subclass as Amount.atoms must be rejected (exact type check)."""
+
+    class EvilInt(int):
+        pass
+
+    with pytest.raises(TypeError, match="integer"):
+        Amount(EvilInt(42))  # type: ignore[arg-type]
+
+
+def test_cyclic_tuple_graph_is_rejected() -> None:
+    """A tuple that indirectly references itself must be rejected."""
+    outer: list[object] = []
+    t = (outer,)
+    outer.append(t)
+    assert not is_deeply_immutable(t)
+
+
+def test_cyclic_frozendict_graph_is_rejected_at_construction() -> None:
+    """A FrozenDict containing a list (which could form a cycle) is rejected at construction."""
+    outer: list[object] = []
+    with pytest.raises(TypeError, match="deeply immutable"):
+        FrozenDict({"cycle": outer})
+
+
+def test_non_deeply_immutable_dataclass_as_field_is_rejected() -> None:
+    """A frozen dataclass that does not inherit DeeplyImmutable is rejected
+    by the DeeplyImmutable.__post_init__ recursive check."""
+    from dataclasses import dataclass, field
+    from typing import Any
+
+    @dataclass(frozen=True, slots=True)
+    class NotDeeplyImmutable:
+        value: int
+
+    @dataclass(frozen=True, slots=True)
+    class Container(DeeplyImmutable):
+        payload: Any = None
+
+    with pytest.raises(TypeError, match="deeply immutable"):
+        Container(payload=NotDeeplyImmutable(42))
+
+
+def test_mutable_dataclass_as_field_is_rejected() -> None:
+    """A non-frozen dataclass is rejected even if it inherits DeeplyImmutable."""
+    from dataclasses import dataclass
+    from typing import Any
+
+    @dataclass(slots=True)
+    class MutableButMarked(DeeplyImmutable):
+        value: int
+
+    @dataclass(frozen=True, slots=True)
+    class Container(DeeplyImmutable):
+        payload: Any = None
+
+    with pytest.raises(TypeError, match="deeply immutable"):
+        Container(payload=MutableButMarked(42))
+
+
+def test_profile_rejects_mutable_nested_frozendict_value() -> None:
+    """A FrozenDict with a nested list value must be rejected at profile construction."""
+    with pytest.raises(TypeError):
+        FrozenDict({"evil": ([1, 2],)})  # type: ignore[dict-item]
+
+
+def test_request_rejects_mutable_state_value() -> None:
+    """A request state FrozenDict with a list value must be rejected."""
+    profile = _minimal_profile()
+    with pytest.raises(TypeError, match="deeply immutable"):
+        FrozenDict({"phase": [1, 2]})  # type: ignore[dict-item]
+
+
+def test_deeply_immutable_rejects_plain_dict() -> None:
+    """A plain dict is not deeply immutable."""
+    assert not is_deeply_immutable({"key": "value"})
+
+
+def test_deeply_immutable_rejects_plain_list() -> None:
+    """A plain list is not deeply immutable."""
+    assert not is_deeply_immutable([1, 2, 3])
+
+
+def test_deeply_immutable_rejects_plain_set() -> None:
+    """A plain set is not deeply immutable."""
+    assert not is_deeply_immutable({1, 2, 3})
+
+
+def test_deeply_immutable_rejects_callable() -> None:
+    """A callable is not deeply immutable."""
+    assert not is_deeply_immutable(lambda: None)
+
+
+def test_deeply_immutable_rejects_module() -> None:
+    """A module is not deeply immutable."""
+    import json
+
+    assert not is_deeply_immutable(json)
+
+
+def test_deeply_immutable_rejects_class() -> None:
+    """A class object is not deeply immutable."""
+    assert not is_deeply_immutable(int)
+
+
+def test_profile_post_construction_attribute_rebind_fails() -> None:
+    """frozen=True blocks attribute rebinding on a constructed profile."""
+    profile = _minimal_profile()
+    with pytest.raises(Exception):
+        profile.profile_id = "evil"  # type: ignore[misc]
+
+
+def test_request_post_construction_attribute_rebind_fails() -> None:
+    """frozen=True blocks attribute rebinding on a constructed request."""
+    profile = _minimal_profile()
+    request = _minimal_request(profile)
+    with pytest.raises(Exception):
+        request.request_id = "evil"  # type: ignore[misc]
+
+
+def test_response_post_construction_attribute_rebind_fails() -> None:
+    """frozen=True blocks attribute rebinding on a constructed response."""
+    profile = _minimal_profile()
+    request = _minimal_request(profile)
+    response = ap.build_response(
+        request=request,
+        profile=profile,
+        decision_kind=ap.AdapterDecisionKind.REJECT,
+        reason_code="WRONG_PHASE",
+        reason_details=FrozenDict({"field": "phase"}),
+        pre_state=FrozenDict({"phase": "draft"}),
+        pre_state_hash=_DUMMY_HASH,
+        post_state=FrozenDict({"phase": "draft"}),
+        post_state_hash=_DUMMY_HASH,
+    )
+    with pytest.raises(Exception):
+        response.decision_kind = ap.AdapterDecisionKind.ACCEPT  # type: ignore[misc]
+
+
+def test_all_protocol_dataclasses_inherit_deeply_immutable() -> None:
+    """Every dataclass in adapter_protocol must inherit DeeplyImmutable."""
+    for _name, cls in inspect.getmembers(ap, inspect.isclass):
+        if cls.__module__ != ap.__name__ or not dataclasses.is_dataclass(cls):
+            continue
+        assert issubclass(cls, DeeplyImmutable), f"{cls.__name__} does not inherit DeeplyImmutable"
+
+
+def test_all_protocol_dataclasses_use_slots() -> None:
+    """Every dataclass in adapter_protocol must use __slots__."""
+    for _name, cls in inspect.getmembers(ap, inspect.isclass):
+        if cls.__module__ != ap.__name__ or not dataclasses.is_dataclass(cls):
+            continue
+        assert hasattr(cls, "__slots__"), f"{cls.__name__} lacks __slots__"
+
+
+def test_all_protocol_dataclasses_are_frozen() -> None:
+    """Every dataclass in adapter_protocol must be frozen=True."""
+    for _name, cls in inspect.getmembers(ap, inspect.isclass):
+        if cls.__module__ != ap.__name__ or not dataclasses.is_dataclass(cls):
+            continue
+        assert cls.__dataclass_params__.frozen, f"{cls.__name__} is not frozen"
+
+
+def test_frozendict_rejects_duplicate_keys() -> None:
+    """FrozenDict must reject duplicate keys at construction."""
+    with pytest.raises(ValueError, match="duplicate"):
+        FrozenDict([("a", 1), ("a", 2)])  # type: ignore[list-item]
+
+
+def test_frozendict_rejects_non_string_key() -> None:
+    """FrozenDict must reject non-string keys."""
+    with pytest.raises(TypeError, match="exact strings"):
+        FrozenDict({1: "value"})  # type: ignore[dict-item]
+
+
+# ---------------------------------------------------------------------------
 # Canonical encoding and hash domain separation tests.
 # ---------------------------------------------------------------------------
 

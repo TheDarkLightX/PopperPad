@@ -1,0 +1,117 @@
+{
+  "schema": "popperpad/data-adapter-protocol/v1",
+  "profile_id": "popperpad.falsification-market.single-slot.v1",
+  "profile_version": "1",
+  "protocol_version": "v1",
+  "abstraction_id": "popperpad.falsification-market.single-slot.v1",
+  "codec_version": "popperpad-json-int-v2",
+  "bounty_terms": {
+    "bounty_id": "bounty-1",
+    "claim_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "context_ref": null,
+    "reward_atoms": 1000,
+    "minimum_submission_bond_atoms": 100,
+    "deadline_epoch_s": 1000,
+    "challenge_window_seconds": 100,
+    "accepted_recipe_refs": [
+      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ],
+    "accepted_verifier_refs": [
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    ]
+  },
+  "market_policy": {
+    "minimum_bounty_atoms": 1000,
+    "minimum_submission_bond_atoms": 100,
+    "minimum_challenge_deposit_atoms": 50,
+    "slashable_findings": [
+      "invalid_signature"
+    ],
+    "treasury_ref": "protocol:treasury",
+    "challenge_resolution_seconds": 100
+  },
+  "identity_aliases": {
+    "sponsor": "did:example:sponsor",
+    "submitter": "did:example:refuter",
+    "challenger": "did:example:challenger",
+    "recipe": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verifier": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "evidence_refs": [
+      "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    ],
+    "artifact_refs": [
+      "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    ],
+    "verifier_receipt": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "challenge_evidence_refs": [
+      "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    ],
+    "challenge_receipt": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "settlement": "chain:tx:1"
+  },
+  "time_representatives": {
+    "pre_deadline": {
+      "time_class": "pre_deadline",
+      "now_epoch_s": 100
+    },
+    "at_deadline": {
+      "time_class": "at_deadline",
+      "now_epoch_s": 1000
+    },
+    "challenge_window": {
+      "time_class": "challenge_window",
+      "now_epoch_s": 1050
+    },
+    "post_challenge_window": {
+      "time_class": "post_challenge_window",
+      "now_epoch_s": 1101
+    },
+    "post_resolution_deadline": {
+      "time_class": "post_resolution_deadline",
+      "now_epoch_s": 1200
+    }
+  },
+  "numeric_bounds": {
+    "reward_atoms": {"min_atoms": 1000, "max_atoms": 1000},
+    "bond_atoms": {"min_atoms": 100, "max_atoms": 100},
+    "deposit_atoms": {"min_atoms": 50, "max_atoms": 50}
+  },
+  "cardinality_bounds": {
+    "bounties": {"min_count": 1, "max_count": 1},
+    "submissions": {"min_count": 0, "max_count": 1},
+    "challenges": {"min_count": 0, "max_count": 1}
+  },
+  "allowed_abstract_commands": [
+    "open_bounty",
+    "submit_candidate",
+    "verify_submission",
+    "open_challenge",
+    "resolve_challenge",
+    "advance_bounty",
+    "settle_bounty",
+    "cancel_bounty"
+  ],
+  "expected_rejection_precedence": [
+    "INVALID_STATE",
+    "INVALID_POLICY",
+    "INVALID_COMMAND",
+    "DUPLICATE_COMMAND",
+    "WRONG_PHASE",
+    "TIME_WINDOW",
+    "DUPLICATE_ENTITY",
+    "UNKNOWN_ENTITY",
+    "POLICY_MISMATCH",
+    "MISSING_EVIDENCE",
+    "INSUFFICIENT_AMOUNT",
+    "CONSERVATION_FAILURE"
+  ],
+  "source_manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "model_ir_hash": null,
+  "explicit_nonclaims": [
+    "arbitrary_market_cardinality",
+    "unbounded_liveness_or_fairness",
+    "verifier_semantic_correctness",
+    "production_datastore_linearizability",
+    "chain_or_token_refinement"
+  ]
+}
