@@ -14,7 +14,12 @@ pub enum CoreError {
     FloatingPointNotAllowed,
     InvalidDomain,
     InvalidPreStateRoot,
+    InvalidEvidenceRoot,
+    InvalidCreatedAt,
+    InvalidObject,
     InvalidObjectSchema,
+    InvalidMediaType,
+    InvalidEffect,
     DuplicateWrite(String),
     ArithmeticOverflow,
     Serialization(String),
@@ -31,8 +36,17 @@ impl Display for CoreError {
             Self::InvalidPreStateRoot => {
                 formatter.write_str("pre-state root must be empty or sha256:<64hex>")
             }
+            Self::InvalidEvidenceRoot => {
+                formatter.write_str("evidence root must be empty or sha256:<64hex>")
+            }
+            Self::InvalidCreatedAt => formatter.write_str("created_at must be a non-empty string"),
+            Self::InvalidObject => formatter.write_str("object payload must be a mapping"),
             Self::InvalidObjectSchema => {
                 formatter.write_str("committed objects require a non-empty string schema")
+            }
+            Self::InvalidMediaType => formatter.write_str("blob media type must be non-empty"),
+            Self::InvalidEffect => {
+                formatter.write_str("outbox effect requires a non-empty kind and object payload")
             }
             Self::DuplicateWrite(reference) => write!(formatter, "duplicate write: {reference}"),
             Self::ArithmeticOverflow => formatter.write_str("exact amount arithmetic overflowed"),
@@ -239,6 +253,12 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
     if !valid_ref_or_empty(&input.expected_head) {
         return Err(CoreError::InvalidPreStateRoot);
     }
+    if !valid_ref_or_empty(&input.evidence_root) {
+        return Err(CoreError::InvalidEvidenceRoot);
+    }
+    if input.created_at.is_empty() {
+        return Err(CoreError::InvalidCreatedAt);
+    }
 
     let mut seen_refs = HashSet::new();
     let mut object_rows = Vec::with_capacity(input.objects.len());
@@ -262,6 +282,9 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
     let mut blob_rows = Vec::with_capacity(input.blobs.len());
     let mut blob_refs = Vec::with_capacity(input.blobs.len());
     for blob in &input.blobs {
+        if blob.media_type.is_empty() {
+            return Err(CoreError::InvalidMediaType);
+        }
         let payload = blob.payload_utf8.as_bytes();
         let reference = sha256_bytes(payload);
         if !seen_refs.insert(reference.clone()) {
@@ -291,6 +314,12 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
     let mut effect_rows = Vec::with_capacity(input.outbox.len());
     let mut effect_ids = Vec::with_capacity(input.outbox.len());
     for (index, effect) in input.outbox.iter().enumerate() {
+        if effect.kind.is_empty() {
+            return Err(CoreError::InvalidEffect);
+        }
+        if !effect.payload.is_object() {
+            return Err(CoreError::InvalidObject);
+        }
         let effect_id = canonical_hash(
             "outbox-effect-id/v1",
             &json!({
@@ -469,5 +498,59 @@ mod tests {
             Amount::new(5).checked_sub(Amount::new(7)),
             Err(CoreError::ArithmeticOverflow)
         );
+    }
+
+    fn minimal_commit_input() -> CommitInput {
+        CommitInput {
+            expected_head: String::new(),
+            created_at: "2026-07-24T00:00:00Z".to_owned(),
+            objects: Vec::new(),
+            blobs: Vec::new(),
+            outbox: Vec::new(),
+            evidence_root: String::new(),
+            policy_version: default_policy_version(),
+            core_version: default_core_version(),
+        }
+    }
+
+    #[test]
+    fn malformed_evidence_root_matches_python_rejection() {
+        let mut input = minimal_commit_input();
+        input.evidence_root = "not-a-ref".to_owned();
+        assert_eq!(plan_commit(&input), Err(CoreError::InvalidEvidenceRoot));
+    }
+
+    #[test]
+    fn empty_created_at_matches_python_rejection() {
+        let mut input = minimal_commit_input();
+        input.created_at.clear();
+        assert_eq!(plan_commit(&input), Err(CoreError::InvalidCreatedAt));
+    }
+
+    #[test]
+    fn empty_blob_media_type_matches_python_rejection() {
+        let mut input = minimal_commit_input();
+        input.blobs.push(BlobInput {
+            payload_utf8: "blob".to_owned(),
+            media_type: String::new(),
+        });
+        assert_eq!(plan_commit(&input), Err(CoreError::InvalidMediaType));
+    }
+
+    #[test]
+    fn invalid_outbox_shape_matches_python_rejection() {
+        let mut empty_kind = minimal_commit_input();
+        empty_kind.outbox.push(OutboxInput {
+            kind: String::new(),
+            payload: json!({}),
+        });
+        assert_eq!(plan_commit(&empty_kind), Err(CoreError::InvalidEffect));
+
+        let mut scalar_payload = minimal_commit_input();
+        scalar_payload.outbox.push(OutboxInput {
+            kind: "notify".to_owned(),
+            payload: json!(1),
+        });
+        assert_eq!(plan_commit(&scalar_payload), Err(CoreError::InvalidObject));
     }
 }

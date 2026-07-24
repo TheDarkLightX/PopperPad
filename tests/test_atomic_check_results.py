@@ -69,6 +69,28 @@ def test_support_evidence_and_edge_publish_in_one_commit(tmp_path: Path) -> None
     pad.doctor(strict=True)
 
 
+def test_duplicate_recipe_refs_execute_and_publish_once(tmp_path: Path) -> None:
+    pad = PopperPad(root=tmp_path / "pad")
+    pad.init()
+    recipe_ref = _recipe(
+        pad,
+        recipe_id="deduplicated-support",
+        verdict="support",
+        script="print('ok')",
+        expect={"exit_code": 0, "stdout_contains": "ok"},
+    )
+    hypothesis_ref = _hypothesis(pad, [recipe_ref, recipe_ref])
+    before = pad.log.stats()["event_count"]
+
+    result = pad.run_hypothesis(hypothesis_ref, context_ref=None, mode="prove")
+
+    assert result.ok
+    assert len(result.evidence_refs) == 1
+    assert len(result.edge_refs) == 1
+    assert pad.log.stats()["event_count"] == before + 1
+    pad.doctor(strict=True)
+
+
 def test_refutation_evidence_artifact_edge_and_blobs_publish_together(tmp_path: Path) -> None:
     pad = PopperPad(root=tmp_path / "pad")
     pad.init()
