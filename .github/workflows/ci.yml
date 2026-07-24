@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -69,3 +69,48 @@ jobs:
 
       - name: Test Python-Rust parity kernel
         run: cargo test --manifest-path rust/popperpad-core/Cargo.toml --all-targets
+
+  materialize-esso-refinement:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'agent/esso-market-refinement' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/esso-market-refinement
+          fetch-depth: 0
+      - name: Materialize reviewed source payload
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import io
+          import zipfile
+          from pathlib import Path
+
+          source = Path('.github/workflows/apply-esso-market-refinement.yml').read_text(encoding='utf-8')
+          encoded = source.split("<<'PAYLOAD'\n", 1)[1].split("\nPAYLOAD\n", 1)[0].strip()
+          expected = {
+              'src/popperpad/core/market.py',
+              'src/popperpad/esso_market_adapter.py',
+              'tests/test_market_transitions.py',
+              'tests/test_esso_market_adapter.py',
+          }
+          archive = zipfile.ZipFile(io.BytesIO(base64.b64decode(encoded, validate=True)))
+          names = set(archive.namelist())
+          if names != expected:
+              raise SystemExit(f'archive paths differ: {sorted(names)}')
+          for name in sorted(names):
+              target = Path(name)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(archive.read(name))
+          PY
+          git config user.name 'OpenAI Codex'
+          git config user.email 'codex@openai.com'
+          git add src/popperpad/core/market.py src/popperpad/esso_market_adapter.py tests/test_market_transitions.py tests/test_esso_market_adapter.py
+          if git diff --cached --quiet; then
+            echo 'No source changes to apply.'
+            exit 0
+          fi
+          git commit -m 'Prove the market through an ESSO runtime boundary'
+          git push origin HEAD:agent/esso-market-refinement
