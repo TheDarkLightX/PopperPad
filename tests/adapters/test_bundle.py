@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,29 @@ def test_bundle_root_is_canonical_hash_of_manifest() -> None:
     bundle = Bundle(bundle_id="ex", object_refs=(_ref("a"),), blob_refs=(), entry_refs=(), previous_bundle_refs=())
     manifest = build_manifest(bundle)
     assert bundle_root(manifest) == stable_sha256(manifest.as_dict())
+
+
+def test_bundle_and_manifest_own_nested_metadata() -> None:
+    signature = {"proof": {"path": ["root", "leaf"]}}
+    producer = {"name": "builder", "versions": [1, 2]}
+    bundle = Bundle(
+        bundle_id="owned",
+        object_refs=(_ref("a"),),
+        blob_refs=(),
+        entry_refs=(),
+        signatures=(signature,),
+    )
+    manifest = build_manifest(bundle, producer=producer)
+    expected = deepcopy(manifest.as_dict())
+    expected_root = bundle_root(manifest)
+
+    signature["proof"]["path"].append("mutated")
+    producer["versions"].append(3)
+
+    assert manifest.as_dict() == expected
+    assert bundle_root(manifest) == expected_root
+    with pytest.raises(TypeError):
+        manifest.producer["name"] = "mutated"  # type: ignore[index]
 
 
 def test_export_and_load_round_trip(tmp_path: Path) -> None:
