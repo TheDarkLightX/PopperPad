@@ -1,0 +1,29 @@
+name: Branch source export
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/branch-source-export.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: popperpad-esso-source
+          path: |
+            src
+            tests
+            pyproject.toml
+            rust
+          if-no-files-found: error
+          retention-days: 1
