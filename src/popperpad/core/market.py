@@ -49,6 +49,8 @@ class BountyTerms:
     accepted_verifier_refs: frozenset[str]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "accepted_recipe_refs", frozenset(self.accepted_recipe_refs))
+        object.__setattr__(self, "accepted_verifier_refs", frozenset(self.accepted_verifier_refs))
         if not _valid_id(self.bounty_id):
             raise ValueError("invalid bounty_id")
         if not self.sponsor_ref:
@@ -80,6 +82,34 @@ class SubmissionState:
     bond_locked: Amount
     verifier_receipt_ref: str | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+        object.__setattr__(self, "artifact_refs", tuple(self.artifact_refs))
+        if not _valid_id(self.submission_id):
+            raise ValueError("invalid submission_id")
+        if not self.submitter_ref:
+            raise ValueError("submitter_ref must be non-empty")
+        if not (_valid_ref(self.recipe_ref) and _valid_ref(self.verifier_ref)):
+            raise ValueError("recipe_ref and verifier_ref must be sha256 refs")
+        if not self.evidence_refs or not all(_valid_ref(ref) for ref in self.evidence_refs):
+            raise ValueError("evidence_refs must be non-empty sha256 refs")
+        if not all(_valid_ref(ref) for ref in self.artifact_refs):
+            raise ValueError("artifact_refs must be sha256 refs")
+        if not isinstance(self.submitted_at, int) or isinstance(self.submitted_at, bool) or self.submitted_at < 0:
+            raise ValueError("submitted_at must be a non-negative integer")
+        if not isinstance(self.status, SubmissionStatus):
+            raise TypeError("status must be SubmissionStatus")
+        if not isinstance(self.bond_locked, Amount):
+            raise TypeError("bond_locked must be Amount")
+        if self.status is SubmissionStatus.PENDING:
+            if self.verifier_receipt_ref is not None:
+                raise ValueError("pending submission cannot carry verifier receipt")
+        else:
+            if self.verifier_receipt_ref is None or not _valid_ref(self.verifier_receipt_ref):
+                raise ValueError("resolved submission requires verifier receipt ref")
+        if self.status is SubmissionStatus.REJECTED and self.bond_locked.atoms != 0:
+            raise ValueError("rejected submission cannot retain a locked bond")
+
 
 @dataclass(frozen=True, slots=True)
 class ChallengeState:
@@ -93,6 +123,31 @@ class ChallengeState:
     deposit_locked: Amount
     verifier_receipt_ref: str | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+        if not (_valid_id(self.challenge_id) and _valid_id(self.submission_id)):
+            raise ValueError("invalid challenge_id or submission_id")
+        if not self.challenger_ref or not self.finding_kind:
+            raise ValueError("challenger_ref and finding_kind must be non-empty")
+        if not self.evidence_refs or not all(_valid_ref(ref) for ref in self.evidence_refs):
+            raise ValueError("challenge evidence_refs must be non-empty sha256 refs")
+        if not isinstance(self.opened_at, int) or isinstance(self.opened_at, bool) or self.opened_at < 0:
+            raise ValueError("opened_at must be a non-negative integer")
+        if not isinstance(self.status, ChallengeStatus):
+            raise TypeError("status must be ChallengeStatus")
+        if not isinstance(self.deposit_locked, Amount):
+            raise TypeError("deposit_locked must be Amount")
+        if self.status is ChallengeStatus.OPEN:
+            if self.deposit_locked.atoms <= 0:
+                raise ValueError("open challenge requires a positive locked deposit")
+            if self.verifier_receipt_ref is not None:
+                raise ValueError("open challenge cannot carry verifier receipt")
+        else:
+            if self.deposit_locked.atoms != 0:
+                raise ValueError("resolved challenge cannot retain a locked deposit")
+            if self.verifier_receipt_ref is None or not _valid_ref(self.verifier_receipt_ref):
+                raise ValueError("resolved challenge requires verifier receipt ref")
+
 
 @dataclass(frozen=True, slots=True)
 class BountyState:
@@ -105,6 +160,15 @@ class BountyState:
     settlement_ref: str | None = None
     processed_command_ids: frozenset[str] = frozenset()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "submissions", tuple(self.submissions))
+        object.__setattr__(self, "challenges", tuple(self.challenges))
+        object.__setattr__(self, "payable_submission_ids", tuple(self.payable_submission_ids))
+        object.__setattr__(self, "processed_command_ids", frozenset(self.processed_command_ids))
+        violations = bounty_state_violations(self)
+        if violations:
+            raise ValueError(f"invalid bounty state: {violations[0]}")
+
 
 @dataclass(frozen=True, slots=True)
 class MarketPolicy:
@@ -115,6 +179,7 @@ class MarketPolicy:
     treasury_ref: str = "protocol:treasury"
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "slashable_findings", frozenset(self.slashable_findings))
         if not self.slashable_findings:
             raise ValueError("slashable_findings must be non-empty")
         if not self.treasury_ref:
@@ -128,6 +193,16 @@ class MarketEffect:
     amount: Amount
     subject_ref: str
     metadata: FrozenDict[JsonValue] = FrozenDict()
+
+    def __post_init__(self) -> None:
+        frozen = freeze_json(self.metadata)
+        if not isinstance(frozen, FrozenDict):
+            raise TypeError("market effect metadata must be an object")
+        object.__setattr__(self, "metadata", frozen)
+        if not self.kind or not self.account_ref or not self.subject_ref:
+            raise ValueError("market effect kind, account_ref, and subject_ref must be non-empty")
+        if not isinstance(self.amount, Amount):
+            raise TypeError("market effect amount must be Amount")
 
     def as_json(self) -> FrozenDict[JsonValue]:
         value = freeze_json(
@@ -177,6 +252,10 @@ class SubmitCandidate:
     bond: Amount
     now_epoch_s: int
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+        object.__setattr__(self, "artifact_refs", tuple(self.artifact_refs))
+
 
 @dataclass(frozen=True, slots=True)
 class VerifySubmission:
@@ -198,6 +277,9 @@ class OpenChallenge:
     evidence_refs: tuple[str, ...]
     deposit: Amount
     now_epoch_s: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +304,12 @@ class Payout:
     submission_id: str
     amount: Amount
 
+    def __post_init__(self) -> None:
+        if not self.recipient_ref or not _valid_id(self.submission_id):
+            raise ValueError("invalid payout recipient or submission_id")
+        if not isinstance(self.amount, Amount) or self.amount.atoms <= 0:
+            raise ValueError("payout amount must be positive")
+
 
 @dataclass(frozen=True, slots=True)
 class SettleBounty:
@@ -229,6 +317,9 @@ class SettleBounty:
     settlement_ref: str
     payouts: tuple[Payout, ...]
     now_epoch_s: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payouts", tuple(self.payouts))
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +359,137 @@ REJECTION_PRECEDENCE = (
     "INSUFFICIENT_AMOUNT",
     "CONSERVATION_FAILURE",
 )
+
+
+
+def bounty_state_violations(state: BountyState) -> tuple[str, ...]:
+    """Return stable structural invariant violations for one immutable state.
+
+    This is intentionally independent of command policy. It captures only
+    facts that must hold for every representable market state, so transition
+    constructors and mounted formal adapters share one boundary contract.
+    """
+
+    violations: list[str] = []
+    if not isinstance(state.terms, BountyTerms):
+        violations.append("terms_type")
+    if not isinstance(state.phase, BountyPhase):
+        violations.append("phase_type")
+    if not isinstance(state.escrow_locked, Amount):
+        violations.append("escrow_type")
+    if not all(isinstance(value, SubmissionState) for value in state.submissions):
+        violations.append("submission_type")
+        return tuple(sorted(set(violations)))
+    if not all(isinstance(value, ChallengeState) for value in state.challenges):
+        violations.append("challenge_type")
+        return tuple(sorted(set(violations)))
+
+    submission_ids = tuple(submission.submission_id for submission in state.submissions)
+    if len(set(submission_ids)) != len(submission_ids):
+        violations.append("duplicate_submission_id")
+    challenge_ids = tuple(challenge.challenge_id for challenge in state.challenges)
+    if len(set(challenge_ids)) != len(challenge_ids):
+        violations.append("duplicate_challenge_id")
+    known_submissions = set(submission_ids)
+    if any(challenge.submission_id not in known_submissions for challenge in state.challenges):
+        violations.append("challenge_unknown_submission")
+    open_challenge_subjects = tuple(
+        challenge.submission_id
+        for challenge in state.challenges
+        if challenge.status is ChallengeStatus.OPEN
+    )
+    if len(set(open_challenge_subjects)) != len(open_challenge_subjects):
+        violations.append("multiple_open_challenges_per_submission")
+
+    payable_ids = tuple(state.payable_submission_ids)
+    if len(set(payable_ids)) != len(payable_ids):
+        violations.append("duplicate_payable_submission_id")
+    submissions_by_id = {submission.submission_id: submission for submission in state.submissions}
+    if any(submission_id not in submissions_by_id for submission_id in payable_ids):
+        violations.append("payable_unknown_submission")
+    if any(
+        submissions_by_id[submission_id].status is not SubmissionStatus.VERIFIED
+        for submission_id in payable_ids
+        if submission_id in submissions_by_id
+    ):
+        violations.append("payable_submission_not_verified")
+
+    open_challenge = any(challenge.status is ChallengeStatus.OPEN for challenge in state.challenges)
+    if open_challenge and state.phase is not BountyPhase.OPEN:
+        violations.append("open_challenge_outside_open_phase")
+    if any(
+        challenge.status is ChallengeStatus.OPEN and challenge.deposit_locked.atoms <= 0
+        for challenge in state.challenges
+    ):
+        violations.append("open_challenge_without_deposit")
+    if any(
+        challenge.status is not ChallengeStatus.OPEN and challenge.deposit_locked.atoms != 0
+        for challenge in state.challenges
+    ):
+        violations.append("resolved_challenge_retains_deposit")
+    if any(
+        submission.status is SubmissionStatus.REJECTED and submission.bond_locked.atoms != 0
+        for submission in state.submissions
+    ):
+        violations.append("rejected_submission_retains_bond")
+
+    if state.phase is BountyPhase.DRAFT:
+        if state.escrow_locked.atoms != 0:
+            violations.append("draft_has_escrow")
+        if state.submissions or state.challenges or state.payable_submission_ids or state.settlement_ref is not None:
+            violations.append("draft_has_activity")
+        if state.processed_command_ids:
+            violations.append("draft_has_processed_command")
+    elif state.phase is BountyPhase.OPEN:
+        if state.escrow_locked.atoms <= 0:
+            violations.append("open_without_escrow")
+        if state.payable_submission_ids:
+            violations.append("open_has_payable_ids")
+        if state.settlement_ref is not None:
+            violations.append("open_has_settlement")
+    elif state.phase is BountyPhase.PAYABLE:
+        if state.escrow_locked.atoms <= 0:
+            violations.append("payable_without_escrow")
+        if not state.payable_submission_ids:
+            violations.append("payable_without_submission")
+        if open_challenge:
+            violations.append("payable_with_open_challenge")
+        if state.settlement_ref is not None:
+            violations.append("payable_has_settlement")
+    elif state.phase is BountyPhase.SETTLED:
+        if state.escrow_locked.atoms != 0:
+            violations.append("settled_retains_escrow")
+        if not state.payable_submission_ids:
+            violations.append("settled_without_payable_submission")
+        if not state.settlement_ref:
+            violations.append("settled_without_receipt")
+    elif state.phase is BountyPhase.EXPIRED:
+        if state.escrow_locked.atoms != 0:
+            violations.append("expired_retains_escrow")
+        if state.payable_submission_ids:
+            violations.append("expired_has_payable_ids")
+        if state.settlement_ref is not None:
+            violations.append("expired_has_settlement")
+    elif state.phase is BountyPhase.CANCELED:
+        if state.escrow_locked.atoms != 0:
+            violations.append("canceled_retains_escrow")
+        if state.submissions or state.challenges or state.payable_submission_ids:
+            violations.append("canceled_has_activity")
+        if state.settlement_ref is not None:
+            violations.append("canceled_has_settlement")
+
+    if state.phase in {BountyPhase.SETTLED, BountyPhase.EXPIRED, BountyPhase.CANCELED}:
+        if any(submission.bond_locked.atoms != 0 for submission in state.submissions):
+            violations.append("terminal_retains_submission_bond")
+        if any(challenge.deposit_locked.atoms != 0 for challenge in state.challenges):
+            violations.append("terminal_retains_challenge_deposit")
+        if open_challenge:
+            violations.append("terminal_has_open_challenge")
+    if state.phase is not BountyPhase.SETTLED and state.settlement_ref is not None:
+        violations.append("nonsettled_has_settlement")
+    if any(not _valid_id(command_id) for command_id in state.processed_command_ids):
+        violations.append("invalid_processed_command_id")
+    return tuple(sorted(set(violations)))
 
 
 def initial_bounty(terms: BountyTerms) -> BountyState:
@@ -500,8 +722,9 @@ def _resolve_challenge(
         return _reject("INVALID_COMMAND", "verifier_receipt_ref", command.verifier_receipt_ref)
     if state.phase is not BountyPhase.OPEN:
         return _reject("WRONG_PHASE", "phase", state.phase.value)
-    if command.now_epoch_s > _challenge_deadline(state):
-        return _reject("TIME_WINDOW", "challenge_deadline", "resolution arrived too late")
+    # The challenge window governs admission of new challenges. Once admitted,
+    # a challenge remains resolvable after the window closes; otherwise both
+    # resolution and advancement become permanently disabled.
     challenge = _challenge(state, command.challenge_id)
     if challenge is None:
         return _reject("UNKNOWN_ENTITY", "challenge_id", command.challenge_id)
