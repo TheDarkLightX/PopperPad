@@ -7,6 +7,16 @@
   "runtime_adapter_module": "popperpad.esso_market_adapter",
   "runtime_input_schema": "popperpad/esso-market-step/v1",
   "runtime_result_schema": "popperpad/esso-market-result/v1",
+  "runtime_source_blobs": {
+    "src/popperpad/core/market.py": "b18b8a74cab65ce6456b7321989b58b3d09f78be",
+    "src/popperpad/esso_market_adapter.py": "28aca79b7eb0015e5adc1025836984969a5a0c84"
+  },
+  "expected_reachable_refinement": {
+    "reachable_states": 35,
+    "state_action_pairs": 420,
+    "enabled_transitions": 41,
+    "divergences": 0
+  },
   "scope": {
     "bounties": 1,
     "submissions": 1,
