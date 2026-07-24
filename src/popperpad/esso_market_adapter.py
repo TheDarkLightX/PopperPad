@@ -28,8 +28,8 @@ from .core.market import (
     SubmitCandidate,
     VerifySubmission,
     apply_market_command,
-    bounty_state_violations,
 )
+from .core.market_invariants import bounty_state_violations
 from .core.result import Accept, CommittedFailure, Reject
 from .core.values import Amount, FrozenDict, JsonValue, freeze_json, thaw_json
 
@@ -302,6 +302,7 @@ def _policy() -> MarketPolicy:
         minimum_submission_bond=Amount(BOND_ATOMS),
         minimum_challenge_deposit=Amount(DEPOSIT_ATOMS),
         slashable_findings=frozenset({"unavailable_artifact"}),
+        challenge_resolution_seconds=10,
     )
 
 
