@@ -10,9 +10,14 @@ from .core.codec import (
 
 
 def stable_sha256(obj: object) -> str:
-    """Canonical JSON hash under the versioned generic-object domain."""
+    """Legacy canonical JSON hash retained for v1 object/log compatibility.
 
-    return canonical_hash("canonical-json/v2", obj)
+    New authority-bearing commitments must call ``canonical_hash`` with an
+    explicit semantic domain. Keeping this function byte-compatible avoids
+    invalidating existing v1 pads during the FCIS migration.
+    """
+
+    return sha256_bytes(canonical_json_bytes(obj))
 
 
 __all__ = [
