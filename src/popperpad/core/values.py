@@ -112,7 +112,7 @@ def is_deeply_immutable(value: Any, *, _seen: frozenset[int] = frozenset()) -> b
         return all(is_deeply_immutable(child, _seen=seen) for _key, child in value.items_tuple())
     if is_dataclass(value) and not isinstance(value, type):
         params = getattr(type(value), "__dataclass_params__", None)
-        return bool(params and params.frozen) and all(
+        return bool(params and params.frozen) and not hasattr(value, "__dict__") and all(
             is_deeply_immutable(getattr(value, field.name), _seen=seen) for field in fields(value)
         )
     return False

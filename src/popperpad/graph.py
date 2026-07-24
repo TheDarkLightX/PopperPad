@@ -195,7 +195,10 @@ def find_transfer_paths(
 
     evidence: list[EvidenceRecord] = []
     for ref in sorted(evidence_refs):
-        raw = evidence_lookup(ref)
+        try:
+            raw = evidence_lookup(ref)
+        except (KeyError, OSError, UnicodeError, ValueError):
+            continue
         if isinstance(raw, Mapping):
             parsed = _parse_evidence(ref, raw)
             if parsed is not None:

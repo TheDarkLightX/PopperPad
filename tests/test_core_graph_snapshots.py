@@ -193,3 +193,45 @@ def test_shell_resolves_each_evidence_ref_once_before_core_search() -> None:
     )
     assert calls == [evidence]
     assert paths == [{"path": [edge_ref], "obligations_open": []}]
+
+
+def test_unreadable_evidence_on_unrelated_edge_does_not_break_valid_path() -> None:
+    a, b, c, d = R("a"), R("b"), R("c"), R("d")
+    valid_edge_ref, unrelated_edge_ref, missing_evidence = R("1"), R("2"), R("3")
+    edges = [
+        (
+            valid_edge_ref,
+            {
+                "edge_type": "semantic",
+                "from_ref": a,
+                "to_ref": b,
+                "tag": "↦",
+                "obligations": [],
+                "evidence_refs": [],
+            },
+        ),
+        (
+            unrelated_edge_ref,
+            {
+                "edge_type": "semantic",
+                "from_ref": c,
+                "to_ref": d,
+                "tag": "↦",
+                "obligations": [],
+                "evidence_refs": [missing_evidence],
+            },
+        ),
+    ]
+
+    def unreadable(_ref: str):
+        raise KeyError("missing CAS object")
+
+    paths = find_transfer_paths_shell(
+        edges,
+        from_ref=a,
+        to_ref=b,
+        max_depth=2,
+        require_validated=False,
+        evidence_lookup=unreadable,
+    )
+    assert paths == [{"path": [valid_edge_ref], "obligations_open": []}]
