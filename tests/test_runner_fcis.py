@@ -18,6 +18,21 @@ def test_invalid_recipe_is_a_rejection_value() -> None:
     assert result.code == "INVALID_RECIPE"
 
 
+@pytest.mark.parametrize(
+    "files",
+    (
+        {"file": {"text": "one"}, " file ": {"text": "two"}},
+        {"dir/file": {"text": "one"}, "dir\\file": {"text": "two"}},
+    ),
+)
+def test_normalized_duplicate_file_paths_are_rejected(files: dict[str, object]) -> None:
+    result = plan_recipe({"argv": ["tool"], "files": files})
+    assert isinstance(result, Reject)
+    assert result.code == "INVALID_RECIPE"
+    assert result.details["field"].startswith("files.")
+    assert result.details["reason"] == "duplicates a normalized file path"
+
+
 def test_runner_does_not_inherit_unrequested_host_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POPPERPAD_TEST_SECRET", "must-not-cross-boundary")
     cas = ContentAddressedStore(root=tmp_path / "cas")
