@@ -23,10 +23,17 @@ pub enum CoreError {
 impl Display for CoreError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::FloatingPointNotAllowed => formatter.write_str("floating-point JSON is not allowed"),
-            Self::InvalidDomain => formatter.write_str("hash domain must be non-empty, NUL-free, and at most 65535 bytes"),
-            Self::InvalidPreStateRoot => formatter.write_str("pre-state root must be empty or sha256:<64hex>"),
-            Self::InvalidObjectSchema => formatter.write_str("committed objects require a non-empty string schema"),
+            Self::FloatingPointNotAllowed => {
+                formatter.write_str("floating-point JSON is not allowed")
+            }
+            Self::InvalidDomain => formatter
+                .write_str("hash domain must be non-empty, NUL-free, and at most 65535 bytes"),
+            Self::InvalidPreStateRoot => {
+                formatter.write_str("pre-state root must be empty or sha256:<64hex>")
+            }
+            Self::InvalidObjectSchema => {
+                formatter.write_str("committed objects require a non-empty string schema")
+            }
             Self::DuplicateWrite(reference) => write!(formatter, "duplicate write: {reference}"),
             Self::ArithmeticOverflow => formatter.write_str("exact amount arithmetic overflowed"),
             Self::Serialization(message) => write!(formatter, "serialization failure: {message}"),
@@ -222,7 +229,10 @@ fn valid_ref_or_empty(value: &str) -> bool {
     let Some(hex) = value.strip_prefix("sha256:") else {
         return false;
     };
-    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
@@ -400,8 +410,14 @@ mod tests {
         let vectors = vectors();
         assert_eq!(vectors.schema, "popperpad/fcis-vectors/v1");
         for case in vectors.canonical_cases {
-            let bytes = canonical_json_bytes(&case.value).unwrap_or_else(|error| panic!("{}: {error}", case.name));
-            assert_eq!(String::from_utf8(bytes.clone()).expect("canonical JSON is UTF-8"), case.canonical_utf8, "{}", case.name);
+            let bytes = canonical_json_bytes(&case.value)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+            assert_eq!(
+                String::from_utf8(bytes.clone()).expect("canonical JSON is UTF-8"),
+                case.canonical_utf8,
+                "{}",
+                case.name
+            );
             assert_eq!(sha256_bytes(&bytes), case.raw_sha256, "{}", case.name);
         }
     }
@@ -409,27 +425,49 @@ mod tests {
     #[test]
     fn domain_hash_vectors_match_python() {
         for case in vectors().domain_hash_cases {
-            assert_eq!(canonical_hash(&case.domain, &case.value).unwrap(), case.hash, "{}", case.name);
+            assert_eq!(
+                canonical_hash(&case.domain, &case.value).unwrap(),
+                case.hash,
+                "{}",
+                case.name
+            );
         }
     }
 
     #[test]
     fn commit_vectors_match_python() {
         for case in vectors().commit_cases {
-            assert_eq!(plan_commit(&case.input).unwrap(), case.expected, "{}", case.name);
+            assert_eq!(
+                plan_commit(&case.input).unwrap(),
+                case.expected,
+                "{}",
+                case.name
+            );
         }
     }
 
     #[test]
     fn floating_point_is_rejected() {
         let value: Value = serde_json::from_str("{\"risk\":0.5}").unwrap();
-        assert_eq!(canonical_json_bytes(&value), Err(CoreError::FloatingPointNotAllowed));
+        assert_eq!(
+            canonical_json_bytes(&value),
+            Err(CoreError::FloatingPointNotAllowed)
+        );
     }
 
     #[test]
     fn exact_amount_arithmetic_is_checked() {
-        assert_eq!(Amount::new(7).checked_add(Amount::new(5)).unwrap().atoms(), 12);
-        assert_eq!(Amount::new(7).checked_sub(Amount::new(5)).unwrap().atoms(), 2);
-        assert_eq!(Amount::new(5).checked_sub(Amount::new(7)), Err(CoreError::ArithmeticOverflow));
+        assert_eq!(
+            Amount::new(7).checked_add(Amount::new(5)).unwrap().atoms(),
+            12
+        );
+        assert_eq!(
+            Amount::new(7).checked_sub(Amount::new(5)).unwrap().atoms(),
+            2
+        );
+        assert_eq!(
+            Amount::new(5).checked_sub(Amount::new(7)),
+            Err(CoreError::ArithmeticOverflow)
+        );
     }
 }
