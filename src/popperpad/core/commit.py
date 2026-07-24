@@ -137,7 +137,65 @@ def plan_commit(
     policy_version: str = "popperpad-policy/v1",
     core_version: str = "popperpad-core/v1",
 ) -> CommitBundle | Reject:
-    """Purely construct one exact atomic commit and receipt plan."""
+    """Purely construct one exact atomic v2 commit and receipt plan."""
+
+    return _plan_commit(
+        expected_head=expected_head,
+        created_at=created_at,
+        objects=objects,
+        prevalidated_objects=(),
+        blobs=blobs,
+        outbox=outbox,
+        evidence_root=evidence_root,
+        policy_version=policy_version,
+        core_version=core_version,
+    )
+
+
+def plan_prevalidated_commit(
+    *,
+    expected_head: str,
+    created_at: str,
+    objects: tuple[tuple[bytes, str], ...] = (),
+    blobs: tuple[tuple[bytes, str], ...] = (),
+    evidence_root: str = "",
+    policy_version: str = "popperpad-import-policy/v1",
+    core_version: str = "popperpad-core/v1",
+) -> CommitBundle | Reject:
+    """Bind shell-validated legacy canonical object bytes into one commit.
+
+    This compatibility planner does not reinterpret v1 JSON as integer-only v2
+    values. The shell must validate each schema and canonical byte string first;
+    this core function verifies types, content addresses, and duplicate writes,
+    then commits only immutable refs and byte counts.
+    """
+
+    return _plan_commit(
+        expected_head=expected_head,
+        created_at=created_at,
+        objects=(),
+        prevalidated_objects=objects,
+        blobs=blobs,
+        outbox=(),
+        evidence_root=evidence_root,
+        policy_version=policy_version,
+        core_version=core_version,
+    )
+
+
+def _plan_commit(
+    *,
+    expected_head: str,
+    created_at: str,
+    objects: tuple[Mapping[str, Any], ...],
+    prevalidated_objects: tuple[tuple[bytes, str], ...],
+    blobs: tuple[tuple[bytes, str], ...],
+    outbox: tuple[tuple[str, Mapping[str, Any]], ...],
+    evidence_root: str,
+    policy_version: str,
+    core_version: str,
+) -> CommitBundle | Reject:
+    """Construct one exact commit from ordinary or prevalidated object bytes."""
 
     if not _valid_root(expected_head):
         return _reject("INVALID_PRE_STATE_ROOT", "expected_head must be empty or sha256:<64hex>")
@@ -149,6 +207,17 @@ def plan_commit(
     object_writes: list[ObjectWrite] = []
     object_rows: list[dict[str, JsonValue]] = []
     seen_refs: set[str] = set()
+    for payload, schema in prevalidated_objects:
+        if not isinstance(payload, bytes):
+            return _reject("INVALID_OBJECT", "prevalidated object payload must be bytes")
+        if not isinstance(schema, str) or not schema:
+            return _reject("INVALID_OBJECT_SCHEMA", "every object must carry a non-empty schema")
+        ref = sha256_bytes(payload)
+        if ref in seen_refs:
+            return _reject("DUPLICATE_WRITE", f"duplicate object ref: {ref}")
+        seen_refs.add(ref)
+        object_writes.append(ObjectWrite(ref=ref, schema=schema, payload=payload))
+        object_rows.append({"ref": ref, "schema": schema, "bytes": len(payload)})
     for raw in objects:
         frozen = _freeze_payload(raw)
         if isinstance(frozen, Reject):
