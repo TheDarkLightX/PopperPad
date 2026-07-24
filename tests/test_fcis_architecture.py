@@ -21,6 +21,9 @@ from popperpad.core import (
     thaw_json,
 )
 from popperpad.core.check import AggregateVerdict, CheckSummary, RunIntent, decide_check_summary
+from popperpad.core.commit import CommitBundle
+from popperpad.core.graph import StatusSnapshot
+from popperpad.core.outbox import CommittedEffect, OutboxSnapshot
 from popperpad.core.recipe import ProcessObservation, RecipePlan, evaluate_observation, plan_recipe
 
 
@@ -31,6 +34,7 @@ CORE_MODULES = (
     "popperpad.core.evidence",
     "popperpad.core.graph",
     "popperpad.core.mechanism",
+    "popperpad.core.outbox",
     "popperpad.core.recipe",
     "popperpad.core.result",
     "popperpad.core.values",
@@ -60,6 +64,7 @@ FORBIDDEN_POPPERPAD_IMPORTS = {
     "popperpad.engine",
     "popperpad.index",
     "popperpad.log",
+    "popperpad.outbox",
     "popperpad.pad",
     "popperpad.runner",
     "popperpad.tui",
@@ -183,6 +188,55 @@ def test_committed_failure_rejects_mutable_authority_payloads() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("factory", "field"),
+    (
+        (
+            lambda: OutboxSnapshot(effects=[], acknowledgements=()),  # type: ignore[arg-type]
+            "effects",
+        ),
+        (
+            lambda: StatusSnapshot(  # type: ignore[arg-type]
+                hypothesis_ref="h",
+                context_ref=None,
+                accepted_recipe_refs=frozenset(),
+                edges=[],
+                evidence=(),
+                recipes=(),
+            ),
+            "edges",
+        ),
+    ),
+)
+def test_core_snapshots_reject_retained_mutable_aliases(factory: object, field: str) -> None:
+    with pytest.raises(TypeError, match=field):
+        factory()  # type: ignore[operator]
+
+
+def test_core_effects_reject_mutable_nested_authority() -> None:
+    with pytest.raises(TypeError, match="payload"):
+        CommittedEffect(
+            effect_id="sha256:" + "a" * 64,
+            commit_record_hash="sha256:" + "b" * 64,
+            kind="notify",
+            payload={"message": []},  # type: ignore[arg-type]
+        )
+
+
+def test_commit_bundle_rejects_mutable_plan_aliases() -> None:
+    with pytest.raises(TypeError, match="objects"):
+        CommitBundle(  # type: ignore[arg-type]
+            expected_head="",
+            commit_root="sha256:" + "a" * 64,
+            record_hash="sha256:" + "b" * 64,
+            objects=[],
+            blobs=(),
+            outbox=(),
+            receipt="immutable",
+            record=FrozenDict(),
+        )
+
+
 def test_decisions_reject_frozen_dataclasses_with_writable_instance_dicts() -> None:
     @dataclasses.dataclass(frozen=True)
     class ShallowFrozenState:
@@ -225,7 +279,7 @@ def test_decisions_reject_enum_members_with_mutable_values() -> None:
         Accept(next_state=MutableValueEnum.AUTHORITY, effects=(), receipt="r1")
 
 
-def test_all_core_dataclasses_are_frozen_slotted_and_have_no_mutable_fields() -> None:
+def test_all_core_dataclasses_are_runtime_guarded_frozen_slotted_and_typed_immutable() -> None:
     for module_name in CORE_MODULES:
         module = importlib.import_module(module_name)
         for _name, cls in inspect.getmembers(module, inspect.isclass):
@@ -275,3 +329,12 @@ def test_core_graph_functions_accept_snapshots_not_lookup_callbacks() -> None:
     transfer_parameters = inspect.signature(graph_core.find_transfer_paths).parameters
     assert tuple(status_parameters) == ("snapshot",)
     assert "evidence_lookup" not in transfer_parameters
+
+
+def test_core_outbox_functions_accept_values_not_delivery_handlers() -> None:
+    outbox_core = importlib.import_module("popperpad.core.outbox")
+    pending_parameters = inspect.signature(outbox_core.pending_outbox).parameters
+    acknowledgement_parameters = inspect.signature(outbox_core.plan_acknowledgement).parameters
+    assert tuple(pending_parameters) == ("snapshot",)
+    assert "handler" not in pending_parameters
+    assert "deliver" not in acknowledgement_parameters

@@ -11,7 +11,12 @@ V = TypeVar("V")
 
 
 class DeeplyImmutable:
-    """Marker and runtime guard for owned functional-core value graphs."""
+    """Runtime guard for owned, transitively immutable core value graphs.
+
+    ``frozen=True`` blocks ordinary attribute rebinding only. Core values also
+    inherit this trusted marker, use slots, own their children, and validate the
+    complete reachable graph at construction.
+    """
 
     __slots__ = ()
 
