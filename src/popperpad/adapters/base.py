@@ -53,7 +53,7 @@ class PreparedBundle:
     object_count: int
     blob_count: int
     byte_size: int
-    canonicalization: str = "popperpad-json-int-v2"
+    canonicalization: str = "popperpad-json-c14n-v1"
 
 
 @dataclass(frozen=True, slots=True)

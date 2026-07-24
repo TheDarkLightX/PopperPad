@@ -4,18 +4,27 @@ import ast
 import dataclasses
 import importlib
 import inspect
+from enum import Enum
 from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
 
 import pytest
 
-from popperpad.core import Accept, Amount, CommittedFailure, FrozenDict, Reject, freeze_json, thaw_json
+from popperpad.core import (
+    Accept,
+    Amount,
+    CommittedFailure,
+    DeeplyImmutable,
+    FrozenDict,
+    Reject,
+    freeze_json,
+    thaw_json,
+)
 from popperpad.core.check import AggregateVerdict, CheckSummary, RunIntent, decide_check_summary
 from popperpad.core.commit import CommitBundle
 from popperpad.core.graph import StatusSnapshot
 from popperpad.core.outbox import CommittedEffect, OutboxSnapshot
 from popperpad.core.recipe import ProcessObservation, RecipePlan, evaluate_observation, plan_recipe
-from popperpad.core.values import DeeplyImmutable
 
 
 CORE_MODULES = (
@@ -240,6 +249,36 @@ def test_decisions_reject_frozen_dataclasses_with_writable_instance_dicts() -> N
         Accept(next_state=state, effects=(), receipt="r1")
 
 
+def test_decisions_reject_untrusted_slotted_frozen_dataclasses() -> None:
+    @dataclasses.dataclass(frozen=True, slots=True)
+    class UntrustedState:
+        balance: int
+
+    with pytest.raises(TypeError, match="next_state"):
+        Accept(next_state=UntrustedState(10), effects=(), receipt="r1")
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        type("MutableString", (str,), {})("authority"),
+        type("MutableInteger", (int,), {})(7),
+    ),
+)
+def test_decisions_reject_mutable_scalar_subclasses(value: object) -> None:
+    value.retained_alias = []  # type: ignore[attr-defined]
+    with pytest.raises(TypeError, match="next_state"):
+        Accept(next_state=value, effects=(), receipt="r1")
+
+
+def test_decisions_reject_enum_members_with_mutable_values() -> None:
+    class MutableValueEnum(Enum):
+        AUTHORITY = {"events": []}
+
+    with pytest.raises(TypeError, match="next_state"):
+        Accept(next_state=MutableValueEnum.AUTHORITY, effects=(), receipt="r1")
+
+
 def test_all_core_dataclasses_are_runtime_guarded_frozen_slotted_and_typed_immutable() -> None:
     for module_name in CORE_MODULES:
         module = importlib.import_module(module_name)
@@ -249,10 +288,9 @@ def test_all_core_dataclasses_are_runtime_guarded_frozen_slotted_and_typed_immut
             params = cls.__dataclass_params__
             assert params.frozen, f"{module_name}.{cls.__name__} is not frozen"
             assert hasattr(cls, "__slots__"), f"{module_name}.{cls.__name__} is not slotted"
-            if cls is not FrozenDict:
-                assert issubclass(cls, DeeplyImmutable), (
-                    f"{module_name}.{cls.__name__} lacks the runtime deep-immutability guard"
-                )
+            assert issubclass(cls, DeeplyImmutable), (
+                f"{module_name}.{cls.__name__} lacks the trusted deep-value guard"
+            )
             for field_name, annotation in get_type_hints(cls).items():
                 assert not _annotation_contains_mutable(annotation), (
                     f"{module_name}.{cls.__name__}.{field_name} exposes a mutable container"

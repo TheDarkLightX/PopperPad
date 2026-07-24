@@ -18,6 +18,14 @@ class CommittedEffect(DeeplyImmutable):
     kind: str
     payload: FrozenDict[JsonValue]
 
+    def __post_init__(self) -> None:
+        _require_string("effect_id", self.effect_id)
+        _require_string("commit_record_hash", self.commit_record_hash)
+        _require_string("kind", self.kind)
+        if type(self.payload) is not FrozenDict:
+            raise TypeError("payload must be FrozenDict")
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
 class DeliveryAcknowledgement(DeeplyImmutable):
@@ -28,6 +36,21 @@ class DeliveryAcknowledgement(DeeplyImmutable):
     delivery_receipt: FrozenDict[JsonValue]
     previous_ack_hash: str
     ack_hash: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "effect_id",
+            "commit_record_hash",
+            "handler_id",
+            "delivered_at",
+            "ack_hash",
+        ):
+            _require_string(field_name, getattr(self, field_name))
+        if type(self.previous_ack_hash) is not str:
+            raise TypeError("previous_ack_hash must be a string")
+        if type(self.delivery_receipt) is not FrozenDict:
+            raise TypeError("delivery_receipt must be FrozenDict")
+        DeeplyImmutable.__post_init__(self)
 
     def core_json(self) -> FrozenDict[JsonValue]:
         value = freeze_json(
@@ -55,10 +78,23 @@ class OutboxSnapshot(DeeplyImmutable):
     effects: tuple[CommittedEffect, ...]
     acknowledgements: tuple[DeliveryAcknowledgement, ...]
 
+    def __post_init__(self) -> None:
+        _require_value_tuple("effects", self.effects, CommittedEffect)
+        _require_value_tuple(
+            "acknowledgements",
+            self.acknowledgements,
+            DeliveryAcknowledgement,
+        )
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
 class PendingOutbox(DeeplyImmutable):
     effects: tuple[CommittedEffect, ...]
+
+    def __post_init__(self) -> None:
+        _require_value_tuple("effects", self.effects, CommittedEffect)
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +103,29 @@ class DeliveryAttempt(DeeplyImmutable):
     status: str  # delivered|failed|missing_handler|already_delivered
     acknowledgement_hash: str = ""
     error: str = ""
+
+    def __post_init__(self) -> None:
+        _require_string("effect_id", self.effect_id)
+        if type(self.status) is not str or self.status not in {
+            "delivered",
+            "failed",
+            "missing_handler",
+            "already_delivered",
+        }:
+            raise ValueError("invalid delivery status")
+        if type(self.acknowledgement_hash) is not str or type(self.error) is not str:
+            raise TypeError("acknowledgement_hash and error must be strings")
+        DeeplyImmutable.__post_init__(self)
+
+
+def _require_string(field_name: str, value: object) -> None:
+    if type(value) is not str or not value:
+        raise TypeError(f"{field_name} must be a non-empty string")
+
+
+def _require_value_tuple(field_name: str, value: object, item_type: type[object]) -> None:
+    if type(value) is not tuple or not all(type(item) is item_type for item in value):
+        raise TypeError(f"{field_name} must be a tuple of {item_type.__name__} values")
 
 
 def _reject(code: str, reason: str) -> Reject:

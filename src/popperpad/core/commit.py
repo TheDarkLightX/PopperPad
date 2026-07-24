@@ -19,6 +19,13 @@ class ObjectWrite(DeeplyImmutable):
     schema: str
     payload: bytes
 
+    def __post_init__(self) -> None:
+        _require_ref("ref", self.ref)
+        _require_string("schema", self.schema)
+        if type(self.payload) is not bytes:
+            raise TypeError("payload must be bytes")
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
 class BlobWrite(DeeplyImmutable):
@@ -26,12 +33,26 @@ class BlobWrite(DeeplyImmutable):
     media_type: str
     payload: bytes
 
+    def __post_init__(self) -> None:
+        _require_ref("ref", self.ref)
+        _require_string("media_type", self.media_type)
+        if type(self.payload) is not bytes:
+            raise TypeError("payload must be bytes")
+        DeeplyImmutable.__post_init__(self)
+
 
 @dataclass(frozen=True, slots=True)
 class OutboxEffect(DeeplyImmutable):
     effect_id: str
     kind: str
     payload: FrozenDict[JsonValue]
+
+    def __post_init__(self) -> None:
+        _require_ref("effect_id", self.effect_id)
+        _require_string("kind", self.kind)
+        if type(self.payload) is not FrozenDict:
+            raise TypeError("payload must be FrozenDict")
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +66,23 @@ class ReceiptDraft(DeeplyImmutable):
     replay_id: str
     next_state_root: str
     effect_plan_hash: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "version",
+            "command_hash",
+            "policy_version",
+            "core_version",
+            "replay_id",
+            "next_state_root",
+            "effect_plan_hash",
+        ):
+            _require_string(field_name, getattr(self, field_name))
+        for field_name in ("pre_state_root", "evidence_root"):
+            value = getattr(self, field_name)
+            if type(value) is not str:
+                raise TypeError(f"{field_name} must be a string")
+        DeeplyImmutable.__post_init__(self)
 
     def as_json(self) -> FrozenDict[JsonValue]:
         value = freeze_json(
@@ -74,6 +112,20 @@ class CommitBundle(DeeplyImmutable):
     outbox: tuple[OutboxEffect, ...]
     receipt: ReceiptDraft
     record: FrozenDict[JsonValue]
+
+    def __post_init__(self) -> None:
+        if type(self.expected_head) is not str:
+            raise TypeError("expected_head must be a string")
+        _require_ref("commit_root", self.commit_root)
+        _require_ref("record_hash", self.record_hash)
+        _require_value_tuple("objects", self.objects, ObjectWrite)
+        _require_value_tuple("blobs", self.blobs, BlobWrite)
+        _require_value_tuple("outbox", self.outbox, OutboxEffect)
+        if type(self.receipt) is not ReceiptDraft:
+            raise TypeError("receipt must be ReceiptDraft")
+        if type(self.record) is not FrozenDict:
+            raise TypeError("record must be FrozenDict")
+        DeeplyImmutable.__post_init__(self)
 
     def logical_records(self) -> tuple[FrozenDict[JsonValue], ...]:
         rows: list[FrozenDict[JsonValue]] = []
@@ -110,6 +162,21 @@ def _reject(code: str, reason: str) -> Reject:
     details = freeze_json({"reason": reason})
     assert isinstance(details, FrozenDict)
     return Reject(code, details)
+
+
+def _require_string(field_name: str, value: object) -> None:
+    if type(value) is not str or not value:
+        raise TypeError(f"{field_name} must be a non-empty string")
+
+
+def _require_ref(field_name: str, value: object) -> None:
+    if type(value) is not str or not _REF_RE.fullmatch(value):
+        raise TypeError(f"{field_name} must be a sha256 ref")
+
+
+def _require_value_tuple(field_name: str, value: object, item_type: type[object]) -> None:
+    if type(value) is not tuple or not all(type(item) is item_type for item in value):
+        raise TypeError(f"{field_name} must be a tuple of {item_type.__name__} values")
 
 
 def _valid_root(value: str) -> bool:

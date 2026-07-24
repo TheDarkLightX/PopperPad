@@ -3,15 +3,33 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from enum import Enum
 from typing import Any, Generic, TypeAlias, TypeVar, cast
 
 
 V = TypeVar("V")
 
 
+class DeeplyImmutable:
+    """Runtime guard for owned, transitively immutable core value graphs.
+
+    ``frozen=True`` blocks ordinary attribute rebinding only. Core values also
+    inherit this trusted marker, use slots, own their children, and validate the
+    complete reachable graph at construction.
+    """
+
+    __slots__ = ()
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if not is_deeply_immutable(value):
+                raise TypeError(
+                    f"{type(self).__name__}.{field.name} must be deeply immutable"
+                )
+
+
 @dataclass(frozen=True, slots=True, init=False)
-class FrozenDict(Mapping[str, V], Generic[V]):
+class FrozenDict(DeeplyImmutable, Mapping[str, V], Generic[V]):
     """Small immutable mapping with canonical key order and owned entries.
 
     The constructor copies the supplied mapping/iterable, rejects duplicate or
@@ -25,7 +43,7 @@ class FrozenDict(Mapping[str, V], Generic[V]):
         pairs = tuple(source.items()) if isinstance(source, Mapping) else tuple(source)
         owned: dict[str, V] = {}
         for key, value in pairs:
-            if not isinstance(key, str):
+            if type(key) is not str:
                 raise TypeError("FrozenDict keys must be strings")
             if key in owned:
                 raise ValueError(f"duplicate FrozenDict key: {key}")
@@ -67,10 +85,12 @@ def freeze_json(value: Any, *, path: str = "$") -> JsonValue:
     or rational representation.
     """
 
-    if value is None or isinstance(value, (bool, str)):
+    if value is None or type(value) is bool:
         return cast(JsonScalar, value)
+    if isinstance(value, str):
+        return str(value)
     if isinstance(value, int) and not isinstance(value, bool):
-        return value
+        return int(value)
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError(f"non-finite number at {path}")
@@ -80,7 +100,8 @@ def freeze_json(value: Any, *, path: str = "$") -> JsonValue:
         for key, child in value.items():
             if not isinstance(key, str):
                 raise TypeError(f"non-string object key at {path}")
-            frozen_items.append((key, freeze_json(child, path=f"{path}.{key}")))
+            owned_key = str(key)
+            frozen_items.append((owned_key, freeze_json(child, path=f"{path}.{owned_key}")))
         return FrozenDict(frozen_items)
     if isinstance(value, (list, tuple)):
         return tuple(freeze_json(child, path=f"{path}[{index}]") for index, child in enumerate(value))
@@ -98,44 +119,26 @@ def thaw_json(value: JsonValue) -> Any:
 
 
 def is_deeply_immutable(value: Any, *, _seen: frozenset[int] = frozenset()) -> bool:
-    if value is None or isinstance(value, (bool, int, str, bytes, Enum, Amount)):
+    if value is None or type(value) in (bool, int, str, bytes, Amount):
         return True
     value_id = id(value)
     if value_id in _seen:
         return False
     seen = _seen | {value_id}
-    if isinstance(value, tuple):
+    if type(value) is tuple:
         return all(is_deeply_immutable(child, _seen=seen) for child in value)
-    if isinstance(value, frozenset):
+    if type(value) is frozenset:
         return all(is_deeply_immutable(child, _seen=seen) for child in value)
-    if isinstance(value, FrozenDict):
+    if type(value) is FrozenDict:
         return all(is_deeply_immutable(child, _seen=seen) for _key, child in value.items_tuple())
     if is_dataclass(value) and not isinstance(value, type):
         params = getattr(type(value), "__dataclass_params__", None)
-        return bool(params and params.frozen) and not hasattr(value, "__dict__") and all(
+        return isinstance(value, DeeplyImmutable) and bool(
+            params and params.frozen
+        ) and not hasattr(value, "__dict__") and all(
             is_deeply_immutable(getattr(value, field.name), _seen=seen) for field in fields(value)
         )
     return False
-
-
-class DeeplyImmutable:
-    """Runtime guard for owned, transitively immutable core values.
-
-    ``frozen=True`` prevents attribute rebinding but does not make a retained
-    list, mapping, or mutable child immutable. Core value constructors inherit
-    this guard so an invalid reachable object graph is rejected at the boundary
-    instead of becoming mutable authority state.
-    """
-
-    __slots__ = ()
-
-    def __post_init__(self) -> None:
-        for field in fields(self):
-            value = getattr(self, field.name)
-            if not is_deeply_immutable(value):
-                raise TypeError(
-                    f"{type(self).__name__}.{field.name} must be deeply immutable"
-                )
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -145,7 +148,7 @@ class Amount(DeeplyImmutable):
     atoms: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.atoms, int) or isinstance(self.atoms, bool):
+        if type(self.atoms) is not int:
             raise TypeError("amount atoms must be an integer")
         if self.atoms < 0:
             raise ValueError("amount atoms must be non-negative")

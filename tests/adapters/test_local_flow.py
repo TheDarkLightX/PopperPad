@@ -36,6 +36,7 @@ def test_gather_prepare_export_publish_anchor_round_trip(tmp_path: Path) -> None
     bundle, objects, blobs = gather_from_pad(pad, object_refs=[obj_ref], entry_refs=[obj_ref], bundle_id="b1")
     manifest = build_manifest(bundle, created_at="2026-01-01T00:00:00Z")
     prepared = prepare(bundle, manifest, objects, blobs)
+    assert prepared.canonicalization == "popperpad-json-c14n-v1"
     assert prepared.object_count == 1
     assert prepared.bundle_root == bundle_root(manifest)
 

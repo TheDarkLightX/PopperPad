@@ -26,7 +26,7 @@ class Reject(DeeplyImmutable):
     details: FrozenDict[JsonValue] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.code, str) or not self.code:
+        if type(self.code) is not str or not self.code:
             raise ValueError("rejection code must be a non-empty string")
         object.__setattr__(self, "details", _own_details(self.details))
         DeeplyImmutable.__post_init__(self)
@@ -55,7 +55,7 @@ class CommittedFailure(DeeplyImmutable, Generic[S, E, R]):
     details: FrozenDict[JsonValue] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.code, str) or not self.code:
+        if type(self.code) is not str or not self.code:
             raise ValueError("committed-failure code must be a non-empty string")
         object.__setattr__(self, "details", _own_details(self.details))
         DeeplyImmutable.__post_init__(self)
