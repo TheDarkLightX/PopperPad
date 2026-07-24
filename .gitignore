@@ -8,7 +8,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+rust/popperpad-core/Cargo.lock
+rust/popperpad-core/target/
 
 # Local pads (default CLI)
 popperpad_data/
-

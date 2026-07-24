@@ -1,0 +1,132 @@
+{
+  "schema": "popperpad/fcis-vectors/v1",
+  "canonical_cases": [
+    {
+      "name": "null",
+      "value": null,
+      "canonical_utf8": "null\n",
+      "raw_sha256": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "name": "scalars",
+      "value": {
+        "false": false,
+        "negative": -7,
+        "null": null,
+        "positive": 42,
+        "text": "α→β",
+        "true": true
+      },
+      "canonical_utf8": "{\"false\":false,\"negative\":-7,\"null\":null,\"positive\":42,\"text\":\"α→β\",\"true\":true}\n",
+      "raw_sha256": "sha256:3e98edc74cfcf889d80a596c9cf37baaecab036c555d0d38576e7cb4c73db0d6"
+    },
+    {
+      "name": "nested",
+      "value": {
+        "z": [3, 2, 1],
+        "a": {
+          "quote": "a\"b",
+          "line": "x\ny",
+          "empty": {}
+        }
+      },
+      "canonical_utf8": "{\"a\":{\"empty\":{},\"line\":\"x\\ny\",\"quote\":\"a\\\"b\"},\"z\":[3,2,1]}\n",
+      "raw_sha256": "sha256:e9726af2845848feb5d43149e4a9537ff9a75a612b8dffb4c10d941866048c50"
+    }
+  ],
+  "domain_hash_cases": [
+    {
+      "name": "null",
+      "domain": "vector/value/v1",
+      "value": null,
+      "hash": "sha256:aa26fed971c6b09af1555a3949f79f33cb93164bac16ef8d5e2e3d8b11d39f71"
+    },
+    {
+      "name": "scalars",
+      "domain": "vector/value/v1",
+      "value": {
+        "false": false,
+        "negative": -7,
+        "null": null,
+        "positive": 42,
+        "text": "α→β",
+        "true": true
+      },
+      "hash": "sha256:27fbc019b9a6739e6be9f1c58256f78193f95e9f6e9a83aedd147145b5dc6c6c"
+    },
+    {
+      "name": "nested",
+      "domain": "vector/value/v1",
+      "value": {
+        "z": [3, 2, 1],
+        "a": {
+          "quote": "a\"b",
+          "line": "x\ny",
+          "empty": {}
+        }
+      },
+      "hash": "sha256:ea8754c640b0bf63b3e552473b2fd834a5a189bd19052286cc5c0e688da4679c"
+    }
+  ],
+  "commit_cases": [
+    {
+      "name": "two-domains-one-blob-two-effects",
+      "input": {
+        "expected_head": "",
+        "created_at": "2026-07-24T00:00:00Z",
+        "objects": [
+          {
+            "schema": "popperpad/domain/v1",
+            "domain_id": "math",
+            "name": "Mathematics",
+            "tags": ["formal", "counterexample"]
+          },
+          {
+            "schema": "popperpad/domain/v1",
+            "domain_id": "software",
+            "name": "Software",
+            "tags": ["property"]
+          }
+        ],
+        "blobs": [
+          {
+            "payload_bytes": [119, 105, 116, 110, 101, 115, 115, 58, 32, 120, 61, 49, 55, 10],
+            "media_type": "text/plain"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "announce",
+            "payload": {"topic": "counterexample", "attempt": 1}
+          },
+          {
+            "kind": "pin",
+            "payload": {"replicas": 3}
+          }
+        ],
+        "evidence_root": "",
+        "policy_version": "popperpad-policy/v1",
+        "core_version": "popperpad-core/v1"
+      },
+      "expected": {
+        "object_refs": [
+          "sha256:ea55c9e914fc7ac02eb196b67956450a4d82cef719e38c8e32be9cb7aabdd231",
+          "sha256:18b32d4b8c2fd286ca755d4b78665fee37f138cc93b584e49e3d5e0f48e3f743"
+        ],
+        "blob_refs": [
+          "sha256:fb669953e6809f63bc69145da73d7356cff818d909c121143d7d13f28014085b"
+        ],
+        "effect_ids": [
+          "sha256:0875de135dbf2e08d15907b07ceb9d2b8dd1fbba8a00b5578a68a5944d5d7c32",
+          "sha256:bd14f381fe21644c8a9f62b5490d0f46fd3b9f4e9643e3d963ee3c8104ee68e6"
+        ],
+        "command_hash": "sha256:6630ff44e8e327de07a17c5b18ade20e6cdcd656cf602165e2448eeaf43f206c",
+        "replay_id": "sha256:ebc90120db459926f63ad73ee2dc1fc2642066f0be6c3e62b45c65e91935bf3d",
+        "effect_plan_hash": "sha256:4e780a0d5bb8414fc3d44e500ce2b9c7a71da32f206fd3fcc6a350cb14bf187c",
+        "commit_root": "sha256:a5b3d52d9aedfac42a81be6039976bd1c3a606ad4c0737d476f8054521b3fb10",
+        "record_hash": "sha256:02ea1989858699f83b553638458e216d3c41aa03a2a8f52a00ec47a9aadd616e",
+        "record_canonical_utf8": "{\"blobs\":[{\"bytes\":14,\"media_type\":\"text/plain\",\"ref\":\"sha256:fb669953e6809f63bc69145da73d7356cff818d909c121143d7d13f28014085b\"}],\"commit_root\":\"sha256:a5b3d52d9aedfac42a81be6039976bd1c3a606ad4c0737d476f8054521b3fb10\",\"created_at\":\"2026-07-24T00:00:00Z\",\"objects\":[{\"bytes\":108,\"ref\":\"sha256:ea55c9e914fc7ac02eb196b67956450a4d82cef719e38c8e32be9cb7aabdd231\",\"schema\":\"popperpad/domain/v1\"},{\"bytes\":94,\"ref\":\"sha256:18b32d4b8c2fd286ca755d4b78665fee37f138cc93b584e49e3d5e0f48e3f743\",\"schema\":\"popperpad/domain/v1\"}],\"op\":\"commit_bundle\",\"outbox\":[{\"effect_id\":\"sha256:0875de135dbf2e08d15907b07ceb9d2b8dd1fbba8a00b5578a68a5944d5d7c32\",\"kind\":\"announce\",\"payload\":{\"attempt\":1,\"topic\":\"counterexample\"}},{\"effect_id\":\"sha256:bd14f381fe21644c8a9f62b5490d0f46fd3b9f4e9643e3d963ee3c8104ee68e6\",\"kind\":\"pin\",\"payload\":{\"replicas\":3}}],\"prev_record_hash\":\"\",\"receipt\":{\"command_hash\":\"sha256:6630ff44e8e327de07a17c5b18ade20e6cdcd656cf602165e2448eeaf43f206c\",\"core_version\":\"popperpad-core/v1\",\"effect_plan_hash\":\"sha256:4e780a0d5bb8414fc3d44e500ce2b9c7a71da32f206fd3fcc6a350cb14bf187c\",\"evidence_root\":\"\",\"next_state_root\":\"sha256:a5b3d52d9aedfac42a81be6039976bd1c3a606ad4c0737d476f8054521b3fb10\",\"policy_version\":\"popperpad-policy/v1\",\"pre_state_root\":\"\",\"replay_id\":\"sha256:ebc90120db459926f63ad73ee2dc1fc2642066f0be6c3e62b45c65e91935bf3d\",\"version\":\"popperpad/receipt/v1\"},\"record_hash\":\"sha256:02ea1989858699f83b553638458e216d3c41aa03a2a8f52a00ec47a9aadd616e\",\"schema\":\"popperpad/log_record/v2\"}\n"
+      }
+    }
+  ]
+}
