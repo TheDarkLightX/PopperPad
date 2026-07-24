@@ -21,6 +21,7 @@ CORE_MODULES = (
     "popperpad.core.evidence",
     "popperpad.core.graph",
     "popperpad.core.mechanism",
+    "popperpad.core.outbox",
     "popperpad.core.recipe",
     "popperpad.core.result",
     "popperpad.core.values",
@@ -50,6 +51,7 @@ FORBIDDEN_POPPERPAD_IMPORTS = {
     "popperpad.engine",
     "popperpad.index",
     "popperpad.log",
+    "popperpad.outbox",
     "popperpad.pad",
     "popperpad.runner",
     "popperpad.tui",
@@ -184,3 +186,12 @@ def test_core_graph_functions_accept_snapshots_not_lookup_callbacks() -> None:
     transfer_parameters = inspect.signature(graph_core.find_transfer_paths).parameters
     assert tuple(status_parameters) == ("snapshot",)
     assert "evidence_lookup" not in transfer_parameters
+
+
+def test_core_outbox_functions_accept_values_not_delivery_handlers() -> None:
+    outbox_core = importlib.import_module("popperpad.core.outbox")
+    pending_parameters = inspect.signature(outbox_core.pending_outbox).parameters
+    acknowledgement_parameters = inspect.signature(outbox_core.plan_acknowledgement).parameters
+    assert tuple(pending_parameters) == ("snapshot",)
+    assert "handler" not in pending_parameters
+    assert "deliver" not in acknowledgement_parameters
