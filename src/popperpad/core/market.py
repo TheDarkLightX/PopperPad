@@ -7,7 +7,7 @@ from typing import TypeAlias
 
 from .codec import canonical_hash
 from .result import Accept, CommittedFailure, Reject
-from .values import Amount, FrozenDict, JsonValue, freeze_json
+from .values import Amount, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -36,7 +36,7 @@ class ChallengeStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class BountyTerms:
+class BountyTerms(DeeplyImmutable):
     bounty_id: str
     sponsor_ref: str
     claim_ref: str
@@ -65,10 +65,11 @@ class BountyTerms:
             raise ValueError("accepted_recipe_refs must be non-empty valid refs")
         if not self.accepted_verifier_refs or not all(_valid_ref(ref) for ref in self.accepted_verifier_refs):
             raise ValueError("accepted_verifier_refs must be non-empty valid refs")
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class SubmissionState:
+class SubmissionState(DeeplyImmutable):
     submission_id: str
     submitter_ref: str
     recipe_ref: str
@@ -82,7 +83,7 @@ class SubmissionState:
 
 
 @dataclass(frozen=True, slots=True)
-class ChallengeState:
+class ChallengeState(DeeplyImmutable):
     challenge_id: str
     submission_id: str
     challenger_ref: str
@@ -95,7 +96,7 @@ class ChallengeState:
 
 
 @dataclass(frozen=True, slots=True)
-class BountyState:
+class BountyState(DeeplyImmutable):
     terms: BountyTerms
     phase: BountyPhase = BountyPhase.DRAFT
     escrow_locked: Amount = Amount(0)
@@ -107,7 +108,7 @@ class BountyState:
 
 
 @dataclass(frozen=True, slots=True)
-class MarketPolicy:
+class MarketPolicy(DeeplyImmutable):
     minimum_bounty: Amount
     minimum_submission_bond: Amount
     minimum_challenge_deposit: Amount
@@ -119,10 +120,11 @@ class MarketPolicy:
             raise ValueError("slashable_findings must be non-empty")
         if not self.treasury_ref:
             raise ValueError("treasury_ref must be non-empty")
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class MarketEffect:
+class MarketEffect(DeeplyImmutable):
     kind: str
     account_ref: str
     amount: Amount
@@ -144,7 +146,7 @@ class MarketEffect:
 
 
 @dataclass(frozen=True, slots=True)
-class TransitionReceipt:
+class TransitionReceipt(DeeplyImmutable):
     version: str
     bounty_id: str
     command_id: str
@@ -158,7 +160,7 @@ class TransitionReceipt:
 
 
 @dataclass(frozen=True, slots=True)
-class OpenBounty:
+class OpenBounty(DeeplyImmutable):
     command_id: str
     sponsor_ref: str
     funded: Amount
@@ -166,7 +168,7 @@ class OpenBounty:
 
 
 @dataclass(frozen=True, slots=True)
-class SubmitCandidate:
+class SubmitCandidate(DeeplyImmutable):
     command_id: str
     submission_id: str
     submitter_ref: str
@@ -179,7 +181,7 @@ class SubmitCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class VerifySubmission:
+class VerifySubmission(DeeplyImmutable):
     command_id: str
     submission_id: str
     verifier_ref: str
@@ -189,7 +191,7 @@ class VerifySubmission:
 
 
 @dataclass(frozen=True, slots=True)
-class OpenChallenge:
+class OpenChallenge(DeeplyImmutable):
     command_id: str
     challenge_id: str
     submission_id: str
@@ -201,7 +203,7 @@ class OpenChallenge:
 
 
 @dataclass(frozen=True, slots=True)
-class ResolveChallenge:
+class ResolveChallenge(DeeplyImmutable):
     command_id: str
     challenge_id: str
     verifier_ref: str
@@ -211,20 +213,20 @@ class ResolveChallenge:
 
 
 @dataclass(frozen=True, slots=True)
-class AdvanceBounty:
+class AdvanceBounty(DeeplyImmutable):
     command_id: str
     now_epoch_s: int
 
 
 @dataclass(frozen=True, slots=True)
-class Payout:
+class Payout(DeeplyImmutable):
     recipient_ref: str
     submission_id: str
     amount: Amount
 
 
 @dataclass(frozen=True, slots=True)
-class SettleBounty:
+class SettleBounty(DeeplyImmutable):
     command_id: str
     settlement_ref: str
     payouts: tuple[Payout, ...]
@@ -232,7 +234,7 @@ class SettleBounty:
 
 
 @dataclass(frozen=True, slots=True)
-class CancelBounty:
+class CancelBounty(DeeplyImmutable):
     command_id: str
     sponsor_ref: str
     now_epoch_s: int
@@ -281,6 +283,20 @@ def apply_market_command(
 ) -> MarketDecision:
     """Apply one total deterministic market transition over immutable values."""
 
+    if not isinstance(
+        command,
+        (
+            OpenBounty,
+            SubmitCandidate,
+            VerifySubmission,
+            OpenChallenge,
+            ResolveChallenge,
+            AdvanceBounty,
+            SettleBounty,
+            CancelBounty,
+        ),
+    ):
+        return _reject("INVALID_COMMAND", "type", type(command).__name__)
     invalid = _validate_common_command(command)
     if invalid is not None:
         return invalid
@@ -500,8 +516,8 @@ def _resolve_challenge(
         return _reject("INVALID_COMMAND", "verifier_receipt_ref", command.verifier_receipt_ref)
     if state.phase is not BountyPhase.OPEN:
         return _reject("WRONG_PHASE", "phase", state.phase.value)
-    if command.now_epoch_s > _challenge_deadline(state):
-        return _reject("TIME_WINDOW", "challenge_deadline", "resolution arrived too late")
+    # The challenge deadline limits filing. A timely open challenge remains
+    # adjudicable afterward so it cannot permanently deadlock the bounty.
     challenge = _challenge(state, command.challenge_id)
     if challenge is None:
         return _reject("UNKNOWN_ENTITY", "challenge_id", command.challenge_id)
@@ -726,10 +742,79 @@ def _cancel_bounty(state: BountyState, command: CancelBounty) -> MarketDecision:
 
 def _validate_common_command(command: MarketCommand) -> Reject | None:
     if not _valid_id(command.command_id):
-        return _reject("INVALID_COMMAND", "command_id", command.command_id)
-    if command.now_epoch_s < 0:
+        return _reject("INVALID_COMMAND", "command_id", str(command.command_id))
+    if (
+        not isinstance(command.now_epoch_s, int)
+        or isinstance(command.now_epoch_s, bool)
+        or command.now_epoch_s < 0
+    ):
         return _reject("INVALID_COMMAND", "now_epoch_s", str(command.now_epoch_s))
+    if isinstance(command, OpenBounty):
+        if not isinstance(command.sponsor_ref, str) or not isinstance(command.funded, Amount):
+            return _reject("INVALID_COMMAND", "open_bounty", "invalid field type")
+    elif isinstance(command, SubmitCandidate):
+        if not all(
+            (
+                isinstance(command.submission_id, str),
+                isinstance(command.submitter_ref, str),
+                isinstance(command.recipe_ref, str),
+                isinstance(command.verifier_ref, str),
+                _is_ref_tuple(command.evidence_refs),
+                _is_ref_tuple(command.artifact_refs),
+                isinstance(command.bond, Amount),
+            )
+        ):
+            return _reject("INVALID_COMMAND", "submit_candidate", "invalid field type")
+    elif isinstance(command, VerifySubmission):
+        if not all(
+            (
+                isinstance(command.submission_id, str),
+                isinstance(command.verifier_ref, str),
+                isinstance(command.verifier_receipt_ref, str),
+                isinstance(command.accepted, bool),
+            )
+        ):
+            return _reject("INVALID_COMMAND", "verify_submission", "invalid field type")
+    elif isinstance(command, OpenChallenge):
+        if not all(
+            (
+                isinstance(command.challenge_id, str),
+                isinstance(command.submission_id, str),
+                isinstance(command.challenger_ref, str),
+                isinstance(command.finding_kind, str),
+                _is_ref_tuple(command.evidence_refs),
+                isinstance(command.deposit, Amount),
+            )
+        ):
+            return _reject("INVALID_COMMAND", "open_challenge", "invalid field type")
+    elif isinstance(command, ResolveChallenge):
+        if not all(
+            (
+                isinstance(command.challenge_id, str),
+                isinstance(command.verifier_ref, str),
+                isinstance(command.verifier_receipt_ref, str),
+                isinstance(command.upheld, bool),
+            )
+        ):
+            return _reject("INVALID_COMMAND", "resolve_challenge", "invalid field type")
+    elif isinstance(command, SettleBounty):
+        if not isinstance(command.settlement_ref, str) or not isinstance(command.payouts, tuple):
+            return _reject("INVALID_COMMAND", "settle_bounty", "invalid field type")
+        if any(
+            not isinstance(payout, Payout)
+            or not isinstance(payout.recipient_ref, str)
+            or not isinstance(payout.submission_id, str)
+            or not isinstance(payout.amount, Amount)
+            for payout in command.payouts
+        ):
+            return _reject("INVALID_COMMAND", "payout", "invalid field type")
+    elif isinstance(command, CancelBounty) and not isinstance(command.sponsor_ref, str):
+        return _reject("INVALID_COMMAND", "sponsor_ref", "invalid field type")
     return None
+
+
+def _is_ref_tuple(value: object) -> bool:
+    return isinstance(value, tuple) and all(isinstance(item, str) for item in value)
 
 
 def _accept(
@@ -976,12 +1061,12 @@ def _challenge_deadline(state: BountyState) -> int:
     return state.terms.deadline_epoch_s + state.terms.challenge_window_seconds
 
 
-def _valid_ref(value: str) -> bool:
-    return bool(_REF_RE.fullmatch(value))
+def _valid_ref(value: object) -> bool:
+    return isinstance(value, str) and bool(_REF_RE.fullmatch(value))
 
 
-def _valid_id(value: str) -> bool:
-    return bool(_ID_RE.fullmatch(value))
+def _valid_id(value: object) -> bool:
+    return isinstance(value, str) and bool(_ID_RE.fullmatch(value))
 
 
 def _reject(code: str, field: str, reason: str) -> Reject:

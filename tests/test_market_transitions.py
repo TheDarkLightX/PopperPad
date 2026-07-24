@@ -253,6 +253,47 @@ def test_rejected_challenge_is_committed_failure_and_slashes_challenger_deposit(
     assert [effect.kind for effect in resolved.effects] == ["slash_challenge_deposit"]
 
 
+def test_timely_challenge_can_be_resolved_after_window_then_bounty_advances() -> None:
+    challenged = apply_market_command(
+        verified_state(),
+        OpenChallenge(
+            "cmd-challenge-at-deadline",
+            "challenge-at-deadline",
+            "submission-1",
+            "did:example:challenger",
+            "invalid_signature",
+            (R("2"),),
+            Amount(50),
+            1_100,
+        ),
+        policy(),
+    )
+    assert isinstance(challenged, Accept)
+
+    resolved = apply_market_command(
+        challenged.next_state,
+        ResolveChallenge(
+            "cmd-resolve-after-window",
+            "challenge-at-deadline",
+            R("d"),
+            R("3"),
+            False,
+            1_200,
+        ),
+        policy(),
+    )
+    assert isinstance(resolved, CommittedFailure)
+    assert resolved.code == "CHALLENGE_REJECTED"
+
+    advanced = apply_market_command(
+        resolved.next_state,
+        AdvanceBounty("cmd-advance-after-resolution", 1_201),
+        policy(),
+    )
+    assert isinstance(advanced, Accept)
+    assert advanced.next_state.phase is BountyPhase.PAYABLE
+
+
 def test_no_payable_submission_expires_and_refunds_all_locked_value() -> None:
     state = submitted_state()
     rejected = apply_market_command(
@@ -315,6 +356,26 @@ def test_rejection_precedence_is_stable_and_rejects_without_state_or_effects() -
     assert opened.submissions == ()
 
 
+def test_unsupported_command_type_returns_typed_rejection() -> None:
+    rejected = apply_market_command(initial_bounty(terms()), object(), policy())  # type: ignore[arg-type]
+    assert isinstance(rejected, Reject)
+    assert rejected.code == "INVALID_COMMAND"
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        OpenBounty(1, "did:example:sponsor", Amount(1_000), 100),  # type: ignore[arg-type]
+        VerifySubmission("cmd", "submission-1", R("d"), R("1"), 1, 700),  # type: ignore[arg-type]
+        SettleBounty("cmd", "chain:tx:1", ("not-a-payout",), 1_200),  # type: ignore[arg-type]
+    ),
+)
+def test_malformed_immutable_command_fields_return_typed_rejection(command: object) -> None:
+    rejected = apply_market_command(initial_bounty(terms()), command, policy())  # type: ignore[arg-type]
+    assert isinstance(rejected, Reject)
+    assert rejected.code == "INVALID_COMMAND"
+
+
 def test_duplicate_command_is_rejected_before_command_specific_checks() -> None:
     state = opened_state()
     replay = apply_market_command(
@@ -375,6 +436,21 @@ def test_constructor_and_transition_own_collection_inputs() -> None:
     verifiers.add(R("f"))
     assert state.terms.accepted_recipe_refs == frozenset({R("c")})
     assert state.terms.accepted_verifier_refs == frozenset({R("d")})
+
+
+def test_market_constructor_rejects_mutable_collection_aliases() -> None:
+    with pytest.raises(TypeError, match="evidence_refs"):
+        SubmitCandidate(  # type: ignore[arg-type]
+            command_id="cmd-mutable",
+            submission_id="submission-mutable",
+            submitter_ref="did:example:refuter",
+            recipe_ref=R("c"),
+            verifier_ref=R("d"),
+            evidence_refs=[R("e")],
+            artifact_refs=(),
+            bond=Amount(100),
+            now_epoch_s=500,
+        )
 
 
 def test_terms_reject_illegal_states_at_construction() -> None:

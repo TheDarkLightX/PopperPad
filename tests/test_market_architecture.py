@@ -7,7 +7,10 @@ import inspect
 from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
 
+import pytest
+
 from popperpad.core import market
+from popperpad.core.values import DeeplyImmutable
 
 
 MUTABLE_ORIGINS = {list, dict, set}
@@ -37,14 +40,26 @@ def _contains_mutable(annotation: object) -> bool:
     return any(_contains_mutable(value) for value in get_args(annotation))
 
 
-def test_market_core_records_are_frozen_slotted_and_collection_safe() -> None:
+def test_market_core_records_are_runtime_guarded_frozen_slotted_and_collection_safe() -> None:
     for _name, cls in inspect.getmembers(market, inspect.isclass):
         if cls.__module__ != market.__name__ or not dataclasses.is_dataclass(cls):
             continue
         assert cls.__dataclass_params__.frozen, cls.__name__
         assert hasattr(cls, "__slots__"), cls.__name__
+        assert issubclass(cls, DeeplyImmutable), cls.__name__
         for field_name, annotation in get_type_hints(cls).items():
             assert not _contains_mutable(annotation), f"{cls.__name__}.{field_name}"
+
+
+def test_market_effect_rejects_mutable_nested_metadata() -> None:
+    with pytest.raises(TypeError, match="metadata"):
+        market.MarketEffect(
+            kind="payout",
+            account_ref="did:example:recipient",
+            amount=market.Amount(1),
+            subject_ref="submission-1",
+            metadata={"reasons": []},  # type: ignore[arg-type]
+        )
 
 
 def test_market_core_has_no_effect_authority() -> None:
