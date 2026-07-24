@@ -2,13 +2,48 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from ..canonical import canonical_json_bytes, sha256_bytes, stable_sha256
 from ..log import utc_now_iso
 from ..refs import Ref, ValidationError, is_ref, require
 from ..schemas import SCHEMA_BUNDLE_MANIFEST_V1
+
+
+def _freeze_metadata(value: Any, *, path: str = "$") -> Any:
+    """Own legacy JSON metadata without narrowing its finite-float domain."""
+
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        require(isfinite(value), f"non-finite metadata number at {path}")
+        return value
+    if isinstance(value, Mapping):
+        owned: dict[str, Any] = {}
+        for key, child in value.items():
+            require(isinstance(key, str), f"metadata key at {path} must be a string")
+            owned[key] = _freeze_metadata(child, path=f"{path}.{key}")
+        return MappingProxyType(owned)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_metadata(child, path=f"{path}[{index}]") for index, child in enumerate(value))
+    raise TypeError(f"unsupported metadata value at {path}: {type(value).__name__}")
+
+
+def _freeze_metadata_mapping(value: Mapping[str, Any], *, path: str) -> Mapping[str, Any]:
+    frozen = _freeze_metadata(value, path=path)
+    require(isinstance(frozen, Mapping), f"metadata at {path} must be an object")
+    return frozen
+
+
+def _thaw_metadata(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_metadata(child) for key, child in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_metadata(child) for child in value]
+    return value
 
 
 def _sorted_refs(refs: Any) -> tuple[Ref, ...]:
@@ -44,6 +79,30 @@ class Bundle:
         object.__setattr__(self, "blob_refs", _sorted_refs(self.blob_refs))
         object.__setattr__(self, "entry_refs", _sorted_refs(self.entry_refs))
         object.__setattr__(self, "previous_bundle_refs", _sorted_refs(self.previous_bundle_refs))
+        object.__setattr__(
+            self,
+            "signatures",
+            tuple(
+                _freeze_metadata_mapping(value, path=f"$.signatures[{index}]")
+                for index, value in enumerate(self.signatures)
+            ),
+        )
+        object.__setattr__(
+            self,
+            "storage_hints",
+            tuple(
+                _freeze_metadata_mapping(value, path=f"$.storage_hints[{index}]")
+                for index, value in enumerate(self.storage_hints)
+            ),
+        )
+        object.__setattr__(
+            self,
+            "anchor_hints",
+            tuple(
+                _freeze_metadata_mapping(value, path=f"$.anchor_hints[{index}]")
+                for index, value in enumerate(self.anchor_hints)
+            ),
+        )
 
     def content(self) -> dict[str, Any]:
         return {
@@ -61,28 +120,49 @@ class Manifest:
     created_at: str
     producer: Mapping[str, Any]
     root_hash: str
-    object_refs: list[str]
-    blob_refs: list[str]
-    entry_refs: list[str]
-    previous_bundle_refs: list[str]
-    signatures: list[Mapping[str, Any]] = field(default_factory=list)
-    storage_hints: list[Mapping[str, Any]] = field(default_factory=list)
-    anchor_hints: list[Mapping[str, Any]] = field(default_factory=list)
+    object_refs: tuple[str, ...]
+    blob_refs: tuple[str, ...]
+    entry_refs: tuple[str, ...]
+    previous_bundle_refs: tuple[str, ...]
+    signatures: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    storage_hints: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    anchor_hints: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "producer", _freeze_metadata_mapping(self.producer, path="$.producer"))
+        for field_name in ("object_refs", "blob_refs", "entry_refs", "previous_bundle_refs"):
+            values = getattr(self, field_name)
+            require(
+                isinstance(values, (list, tuple)) and all(isinstance(value, str) for value in values),
+                f"manifest {field_name} must contain strings",
+            )
+            object.__setattr__(self, field_name, tuple(values))
+        for field_name in ("signatures", "storage_hints", "anchor_hints"):
+            values = getattr(self, field_name)
+            require(isinstance(values, (list, tuple)), f"manifest {field_name} must be an array")
+            object.__setattr__(
+                self,
+                field_name,
+                tuple(
+                    _freeze_metadata_mapping(value, path=f"$.{field_name}[{index}]")
+                    for index, value in enumerate(values)
+                ),
+            )
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
             "bundle_id": self.bundle_id,
             "created_at": self.created_at,
-            "producer": dict(self.producer),
+            "producer": _thaw_metadata(self.producer),
             "root_hash": self.root_hash,
             "object_refs": list(self.object_refs),
             "blob_refs": list(self.blob_refs),
             "entry_refs": list(self.entry_refs),
             "previous_bundle_refs": list(self.previous_bundle_refs),
-            "signatures": [dict(s) for s in self.signatures],
-            "storage_hints": [dict(h) for h in self.storage_hints],
-            "anchor_hints": [dict(h) for h in self.anchor_hints],
+            "signatures": [_thaw_metadata(value) for value in self.signatures],
+            "storage_hints": [_thaw_metadata(value) for value in self.storage_hints],
+            "anchor_hints": [_thaw_metadata(value) for value in self.anchor_hints],
         }
 
 
@@ -98,15 +178,15 @@ def build_manifest(
         schema=SCHEMA_BUNDLE_MANIFEST_V1,
         bundle_id=bundle.bundle_id,
         created_at=created_at or utc_now_iso(),
-        producer=dict(producer) if producer else {"name": "PopperPad", "version": "0.1.0"},
+        producer=producer if producer else {"name": "PopperPad", "version": "0.1.0"},
         root_hash=stable_sha256(content),
         object_refs=content["object_refs"],
         blob_refs=content["blob_refs"],
         entry_refs=content["entry_refs"],
         previous_bundle_refs=content["previous_bundle_refs"],
-        signatures=list(bundle.signatures),
-        storage_hints=list(bundle.storage_hints),
-        anchor_hints=list(bundle.anchor_hints),
+        signatures=bundle.signatures,
+        storage_hints=bundle.storage_hints,
+        anchor_hints=bundle.anchor_hints,
     )
 
 

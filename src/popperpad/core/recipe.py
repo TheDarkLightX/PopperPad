@@ -204,10 +204,18 @@ def plan_recipe(recipe: Mapping[str, Any]) -> RecipePlan | Reject:
     if not isinstance(raw_files, Mapping):
         return _reject("INVALID_RECIPE", field="files", reason="must be an object")
     files: list[tuple[str, InputSpec]] = []
+    normalized_file_paths: set[str] = set()
     for name, raw_spec in raw_files.items():
         normalized = normalize_relative_path(name, f"files.{name}")
         if isinstance(normalized, Reject):
             return normalized
+        if normalized in normalized_file_paths:
+            return _reject(
+                "INVALID_RECIPE",
+                field=f"files.{name}",
+                reason="duplicates a normalized file path",
+            )
+        normalized_file_paths.add(normalized)
         parsed = _input_spec(raw_spec, f"files.{name}")
         if isinstance(parsed, Reject):
             return parsed
