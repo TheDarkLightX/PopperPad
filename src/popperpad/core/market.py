@@ -2,37 +2,60 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from enum import Enum
-from typing import TypeAlias
+from typing import ClassVar, TypeAlias
 
 from .codec import canonical_hash
 from .result import Accept, CommittedFailure, Reject
-from .values import Amount, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
+from .values import Amount, ClosedStrEnum, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9._:/-]{1,128}$")
 
 
-class BountyPhase(str, Enum):
-    DRAFT = "draft"
-    OPEN = "open"
-    PAYABLE = "payable"
-    SETTLED = "settled"
-    EXPIRED = "expired"
-    CANCELED = "canceled"
+class BountyPhase(ClosedStrEnum):
+    __slots__ = ()
+
+    DRAFT: ClassVar[BountyPhase]
+    OPEN: ClassVar[BountyPhase]
+    PAYABLE: ClassVar[BountyPhase]
+    SETTLED: ClassVar[BountyPhase]
+    EXPIRED: ClassVar[BountyPhase]
+    CANCELED: ClassVar[BountyPhase]
+    _symbols = (
+        ("DRAFT", "draft"),
+        ("OPEN", "open"),
+        ("PAYABLE", "payable"),
+        ("SETTLED", "settled"),
+        ("EXPIRED", "expired"),
+        ("CANCELED", "canceled"),
+    )
 
 
-class SubmissionStatus(str, Enum):
-    PENDING = "pending"
-    VERIFIED = "verified"
-    REJECTED = "rejected"
+class SubmissionStatus(ClosedStrEnum):
+    __slots__ = ()
+
+    PENDING: ClassVar[SubmissionStatus]
+    VERIFIED: ClassVar[SubmissionStatus]
+    REJECTED: ClassVar[SubmissionStatus]
+    _symbols = (
+        ("PENDING", "pending"),
+        ("VERIFIED", "verified"),
+        ("REJECTED", "rejected"),
+    )
 
 
-class ChallengeStatus(str, Enum):
-    OPEN = "open"
-    UPHELD = "upheld"
-    REJECTED = "rejected"
+class ChallengeStatus(ClosedStrEnum):
+    __slots__ = ()
+
+    OPEN: ClassVar[ChallengeStatus]
+    UPHELD: ClassVar[ChallengeStatus]
+    REJECTED: ClassVar[ChallengeStatus]
+    _symbols = (
+        ("OPEN", "open"),
+        ("UPHELD", "upheld"),
+        ("REJECTED", "rejected"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
