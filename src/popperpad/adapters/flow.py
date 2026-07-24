@@ -90,10 +90,10 @@ def _content_root_matches(loaded: LoadedBundle) -> bool:
     return stable_sha256(content) == loaded.manifest.root_hash
 
 
-def _preflight_import(loaded: LoadedBundle) -> tuple[tuple[Mapping[str, Any], ...], tuple[tuple[bytes, str], ...]]:
+def _preflight_import(loaded: LoadedBundle) -> tuple[tuple[tuple[bytes, str], ...], tuple[tuple[bytes, str], ...]]:
     """Fully validate hostile bundle bytes before any authoritative pad mutation."""
 
-    objects: list[Mapping[str, Any]] = []
+    objects: list[tuple[bytes, str]] = []
     for ref in loaded.manifest.object_refs:
         payload = loaded.objects.get(ref)
         require(payload is not None, f"missing object payload for {ref}")
@@ -102,7 +102,9 @@ def _preflight_import(loaded: LoadedBundle) -> tuple[tuple[Mapping[str, Any], ..
         require(isinstance(parsed, Mapping), f"object payload is not a mapping: {ref}")
         validate_object(parsed)
         require(canonical_json_bytes(parsed) == payload, f"object payload is not canonical: {ref}")
-        objects.append(dict(parsed))
+        schema = parsed.get("schema")
+        require(isinstance(schema, str) and schema, f"object schema is invalid: {ref}")
+        objects.append((bytes(payload), schema))
 
     blobs: list[tuple[bytes, str]] = []
     for ref in loaded.manifest.blob_refs:
@@ -140,7 +142,7 @@ def import_bundle(bundle_dir: Path, target: PopperPad, policy: TrustPolicy) -> I
             )
 
         objects, blobs = _preflight_import(loaded)
-        committed = target.commit_values(
+        committed = target.commit_prevalidated_values(
             objects=objects,
             blobs=blobs,
             evidence_root=loaded.manifest.root_hash,

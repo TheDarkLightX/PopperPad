@@ -9,6 +9,7 @@ from .core.evidence import (
     CheckExecution,
     ExecutionStatus,
     PlannedCheckObjects,
+    object_ref,
     plan_check_objects,
 )
 from .core.result import Reject
@@ -159,12 +160,17 @@ class CheckEngine:
                 edge_refs=(),
             )
 
-        object_values: list[Mapping[str, Any]] = []
+        object_values_by_ref: dict[str, Mapping[str, Any]] = {}
         evidence_refs: list[str] = []
         edge_refs: list[str] = []
         unique_blobs: dict[str, tuple[bytes, str]] = {}
         for outcome in outcomes:
-            object_values.extend(_planned_plain_objects(outcome.planned))
+            plain_objects = _planned_plain_objects(outcome.planned)
+            for frozen, plain in zip(outcome.planned.objects, plain_objects):
+                ref = object_ref(frozen)
+                existing = object_values_by_ref.get(ref)
+                require(existing is None or existing == plain, "planned object ref collision")
+                object_values_by_ref.setdefault(ref, plain)
             evidence_refs.append(outcome.planned.evidence_ref)
             if outcome.planned.edge_ref is not None:
                 edge_refs.append(outcome.planned.edge_ref)
@@ -172,21 +178,13 @@ class CheckEngine:
                 unique_blobs.setdefault(ref, (payload, media_type))
 
         committed = self._pad.commit_values(
-            objects=tuple(object_values),
+            objects=tuple(object_values_by_ref.values()),
             blobs=tuple(unique_blobs.values()),
             created_at=utc_now_iso(),
             policy_version="popperpad-check-policy/v1",
             core_version="popperpad-core/v1",
         )
-        expected_object_refs = tuple(
-            ref
-            for outcome in outcomes
-            for ref in (
-                outcome.planned.evidence_ref,
-                *((outcome.planned.artifact_ref,) if outcome.planned.artifact_ref else ()),
-                *((outcome.planned.edge_ref,) if outcome.planned.edge_ref else ()),
-            )
-        )
+        expected_object_refs = tuple(object_values_by_ref)
         require(committed.object_refs == expected_object_refs, "committed check refs differ from pure plan")
 
         return RunResult(

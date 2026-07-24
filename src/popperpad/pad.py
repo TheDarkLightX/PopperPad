@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .cas import ContentAddressedStore
-from .core.commit import CommitBundle, plan_commit
+from .canonical import canonical_json_bytes
+from .core.commit import CommitBundle, plan_commit, plan_prevalidated_commit
 from .core.result import Reject
 from .core.values import thaw_json
 from .doctor import Doctor, DoctorReport
@@ -105,6 +107,50 @@ class PopperPad:
         if isinstance(planned, Reject):
             details = thaw_json(planned.details)
             raise ValidationError(f"{planned.code}: {details}")
+
+        return self._publish_commit(planned, expected_head=expected_head)
+
+    def commit_prevalidated_values(
+        self,
+        *,
+        objects: tuple[tuple[bytes, str], ...] = (),
+        blobs: tuple[tuple[bytes, str], ...] = (),
+        evidence_root: str = "",
+        created_at: str | None = None,
+        policy_version: str = "popperpad-import-policy/v1",
+        core_version: str = "popperpad-core/v1",
+    ) -> CommitResult:
+        """Atomically publish exact legacy bytes after full shell validation."""
+
+        owned_objects: list[tuple[bytes, str]] = []
+        for raw_payload, raw_schema in objects:
+            require(isinstance(raw_payload, bytes), "prevalidated object payload must be bytes")
+            require(isinstance(raw_schema, str) and raw_schema, "object schema must be non-empty")
+            payload = bytes(raw_payload)
+            parsed = json.loads(payload.decode("utf-8"))
+            require(isinstance(parsed, Mapping), "prevalidated object must decode to a mapping")
+            validate_object(parsed)
+            require(parsed.get("schema") == raw_schema, "object schema differs from validated payload")
+            require(canonical_json_bytes(parsed) == payload, "object payload is not legacy canonical JSON")
+            owned_objects.append((payload, raw_schema))
+
+        expected_head = self.log.head()
+        planned = plan_prevalidated_commit(
+            expected_head=expected_head,
+            created_at=created_at or utc_now_iso(),
+            objects=tuple(owned_objects),
+            blobs=tuple((bytes(payload), str(media_type)) for payload, media_type in blobs),
+            evidence_root=evidence_root,
+            policy_version=policy_version,
+            core_version=core_version,
+        )
+        if isinstance(planned, Reject):
+            details = thaw_json(planned.details)
+            raise ValidationError(f"{planned.code}: {details}")
+        return self._publish_commit(planned, expected_head=expected_head)
+
+    def _publish_commit(self, planned: CommitBundle, *, expected_head: str) -> CommitResult:
+        """Stage exact bytes, then make one prepared record authoritative."""
 
         self._stage_commit_payloads(planned)
         record = thaw_json(planned.record)

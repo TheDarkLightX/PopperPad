@@ -33,6 +33,30 @@ def test_treasury_insolvent_when_margin_negative() -> None:
     assert treasury_solvent(epoch) is False
 
 
+def test_legacy_numeric_mechanism_api_remains_evaluable() -> None:
+    epoch = TreasuryEpoch(
+        "legacy",
+        starting_balance=1_000.0,
+        inflows=380.0,
+        committed_outflows=910.0,
+        reserve_requirement=250.0,
+    )
+    assert treasury_margin(epoch) == 220.0
+    assert treasury_solvent(epoch) is True
+
+    budget = ResourceBudget(
+        "legacy-budget",
+        funded=600.0,
+        compute=120.0,
+        storage=25.0,
+        api=300.0,
+        verifier=80.0,
+        retrieval=30.0,
+    )
+    assert resource_cost(budget) == 555.0
+    assert resource_budget_covered(budget) is True
+
+
 def test_resource_budget_covered_with_exact_atoms() -> None:
     budget = ResourceBudget("b1", funded=A(600), compute=A(120), storage=A(25), api=A(300), verifier=A(80), retrieval=A(30))
     assert resource_cost(budget) == A(555)
