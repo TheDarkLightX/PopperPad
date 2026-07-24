@@ -37,32 +37,27 @@ jobs:
 
           path = Path('rust/popperpad-core/src/lib.rs')
           text = path.read_text(encoding='utf-8')
-          old = '''            if encoded.contains('.') || encoded.contains('e') || encoded.contains('E') {
+          old = """            if encoded.contains('.') || encoded.contains('e') || encoded.contains('E') {
                           return Err(CoreError::FloatingPointNotAllowed);
                       }
-                      output.push_str(&encoded);
-          '''
-          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
-          new = '''            if encoded.contains('.') || encoded.contains('e') || encoded.contains('E') {
+                      output.push_str(&encoded);"""
+          old = old.replace('                      ', '            ')
+          new = """            if encoded.contains('.') || encoded.contains('e') || encoded.contains('E') {
                           return Err(CoreError::FloatingPointNotAllowed);
                       }
                       if encoded == "-0" {
                           output.push('0');
                       } else {
                           output.push_str(&encoded);
-                      }
-          '''
-          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+                      }"""
+          new = new.replace('                      ', '            ')
           if old in text:
               text = text.replace(old, new, 1)
           elif 'if encoded == "-0"' not in text:
               raise SystemExit('negative-zero source anchor missing')
 
-          marker = '''    #[test]
-              fn floating_point_is_rejected() {
-          '''
-          marker = '\n'.join(line[10:] if line.startswith('          ') else line for line in marker.splitlines())
-          test = '''    #[test]
+          marker = "    #[test]\n    fn floating_point_is_rejected() {"
+          test = """    #[test]
               fn negative_zero_normalizes_to_python_integer_zero() {
                   let negative_zero: Value = serde_json::from_str("{\\"n\\":-0}").unwrap();
                   let zero = json!({"n": 0});
@@ -76,8 +71,7 @@ jobs:
                   );
               }
 
-          '''
-          test = '\n'.join(line[10:] if line.startswith('          ') else line for line in test.splitlines())
+          """.replace('              ', '    ')
           if 'negative_zero_normalizes_to_python_integer_zero' not in text:
               if marker not in text:
                   raise SystemExit('negative-zero test anchor missing')
