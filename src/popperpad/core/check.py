@@ -3,43 +3,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-from .values import DeeplyImmutable
+from .values import ClosedStrEnum, DeeplyImmutable
 
 
-@dataclass(frozen=True, slots=True)
-class RunIntent(DeeplyImmutable):
-    value: str
+class RunIntent(ClosedStrEnum):
+    __slots__ = ()
 
     PROVE: ClassVar[RunIntent]
     REFUTE: ClassVar[RunIntent]
-
-    def __post_init__(self) -> None:
-        if type(self.value) is not str or self.value not in {"prove", "refute"}:
-            raise ValueError("run intent must be prove or refute")
-        DeeplyImmutable.__post_init__(self)
+    _symbols = (("PROVE", "prove"), ("REFUTE", "refute"))
 
 
-RunIntent.PROVE = RunIntent("prove")
-RunIntent.REFUTE = RunIntent("refute")
-
-
-@dataclass(frozen=True, slots=True)
-class AggregateVerdict(DeeplyImmutable):
-    value: str
+class AggregateVerdict(ClosedStrEnum):
+    __slots__ = ()
 
     PASS: ClassVar[AggregateVerdict]
     FAIL: ClassVar[AggregateVerdict]
     INCONCLUSIVE: ClassVar[AggregateVerdict]
-
-    def __post_init__(self) -> None:
-        if type(self.value) is not str or self.value not in {"PASS", "FAIL", "INCONCLUSIVE"}:
-            raise ValueError("aggregate verdict must be PASS, FAIL, or INCONCLUSIVE")
-        DeeplyImmutable.__post_init__(self)
-
-
-AggregateVerdict.PASS = AggregateVerdict("PASS")
-AggregateVerdict.FAIL = AggregateVerdict("FAIL")
-AggregateVerdict.INCONCLUSIVE = AggregateVerdict("INCONCLUSIVE")
+    _symbols = (
+        ("PASS", "PASS"),
+        ("FAIL", "FAIL"),
+        ("INCONCLUSIVE", "INCONCLUSIVE"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +44,7 @@ class CheckSummary(DeeplyImmutable):
 
 
 def recipe_applies(verdict_on_pass: str, intent: RunIntent) -> bool:
-    if intent == RunIntent.PROVE:
+    if intent is RunIntent.PROVE:
         return verdict_on_pass == "support"
     return verdict_on_pass == "refute"
 
@@ -74,7 +59,7 @@ def decide_check_summary(summary: CheckSummary) -> AggregateVerdict:
 
     if not has_evidence:
         return AggregateVerdict.INCONCLUSIVE
-    if summary.intent == RunIntent.REFUTE:
+    if summary.intent is RunIntent.REFUTE:
         if any_pass:
             return AggregateVerdict.PASS
         return AggregateVerdict.INCONCLUSIVE if any_inconclusive else AggregateVerdict.FAIL
