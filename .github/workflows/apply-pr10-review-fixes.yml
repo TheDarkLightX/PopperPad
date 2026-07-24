@@ -1,0 +1,121 @@
+name: Apply PR 10 review fixes
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apply-pr10-review-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/fcis-commit-bundles' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fcis-commit-bundles
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Label v1 bundle canonicalization truthfully
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_BRANCH: agent/fcis-commit-bundles
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          base = Path('src/popperpad/adapters/base.py')
+          text = base.read_text(encoding='utf-8')
+          if 'LEGACY_BUNDLE_CANONICALIZATION' not in text:
+              text = text.replace(
+                  '\n\nclass CheckStatus(str, Enum):\n',
+                  '\n\nLEGACY_BUNDLE_CANONICALIZATION = "popperpad-json-v1"\n\n\nclass CheckStatus(str, Enum):\n',
+                  1,
+              )
+          text = text.replace(
+              'canonicalization: str = "popperpad-json-int-v2"',
+              'canonicalization: str = LEGACY_BUNDLE_CANONICALIZATION',
+          )
+          base.write_text(text, encoding='utf-8')
+
+          flow = Path('src/popperpad/adapters/flow.py')
+          text = flow.read_text(encoding='utf-8')
+          old_import = 'from .base import ImportReport, PreparedBundle, TrustPolicy, VerificationCheck, VerificationReport'
+          new_import = '''from .base import (
+              LEGACY_BUNDLE_CANONICALIZATION,
+              ImportReport,
+              PreparedBundle,
+              TrustPolicy,
+              VerificationCheck,
+              VerificationReport,
+          )'''
+          new_import = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_import.splitlines())
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          old = '        blob_count=len(bundle.blob_refs),\n        byte_size=byte_size,\n    )\n'
+          new = '        blob_count=len(bundle.blob_refs),\n        byte_size=byte_size,\n        canonicalization=LEGACY_BUNDLE_CANONICALIZATION,\n    )\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'canonicalization=LEGACY_BUNDLE_CANONICALIZATION' not in text:
+              raise SystemExit('flow.py review-fix anchor missing')
+          flow.write_text(text, encoding='utf-8')
+
+          tests = Path('tests/adapters/test_ipfs_and_chain.py')
+          text = tests.read_text(encoding='utf-8')
+          old_import = 'from popperpad.adapters.base import PreparedBundle, StorageReceipt'
+          new_import = '''from popperpad.adapters.base import (
+              LEGACY_BUNDLE_CANONICALIZATION,
+              PreparedBundle,
+              StorageReceipt,
+          )'''
+          new_import = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_import.splitlines())
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          if 'test_prepared_v1_bundle_reports_its_actual_canonicalization' not in text:
+              text += '''
+
+          def test_prepared_v1_bundle_reports_its_actual_canonicalization(tmp_path: Path) -> None:
+              _bundle_dir, prepared, _ = _make_bundle(tmp_path)
+              assert prepared.canonicalization == LEGACY_BUNDLE_CANONICALIZATION
+              assert prepared.canonicalization == "popperpad-json-v1"
+          '''
+              text = '\n'.join(line[10:] if line.startswith('          ') else line for line in text.splitlines()) + '\n'
+          tests.write_text(text, encoding='utf-8')
+
+          os.system("python -m pip install -e '.[dev]' >/dev/null")
+          if os.system('python -m pytest -q tests/adapters/test_ipfs_and_chain.py tests/adapters/test_local_flow.py') != 0:
+              raise SystemExit('targeted tests failed')
+
+          headers = {
+              'Accept': 'application/vnd.github+json',
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'popperpad-pr10-fixer',
+          }
+          for path in (base, flow, tests):
+              quoted = urllib.parse.quote(str(path), safe='/')
+              url = f"https://api.github.com/repos/{os.environ['GH_REPOSITORY']}/contents/{quoted}"
+              req = urllib.request.Request(url + '?ref=' + urllib.parse.quote(os.environ['GH_BRANCH']), headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  current = json.load(response)
+              body = json.dumps({
+                  'message': f'Address PR 10 review: {path}',
+                  'content': base64.b64encode(path.read_bytes()).decode('ascii'),
+                  'sha': current['sha'],
+                  'branch': os.environ['GH_BRANCH'],
+              }).encode('utf-8')
+              req = urllib.request.Request(url, data=body, method='PUT', headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  print(json.load(response)['commit']['sha'])
+          PY
