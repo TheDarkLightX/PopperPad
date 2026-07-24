@@ -4,6 +4,7 @@ import ast
 import dataclasses
 import importlib
 import inspect
+from enum import Enum
 from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
 
@@ -181,6 +182,27 @@ def test_decisions_reject_frozen_dataclasses_with_writable_instance_dicts() -> N
     assert state.balance == 999
     with pytest.raises(TypeError, match="next_state"):
         Accept(next_state=state, effects=(), receipt="r1")
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        type("MutableString", (str,), {})("authority"),
+        type("MutableInteger", (int,), {})(7),
+    ),
+)
+def test_decisions_reject_mutable_scalar_subclasses(value: object) -> None:
+    value.retained_alias = []  # type: ignore[attr-defined]
+    with pytest.raises(TypeError, match="next_state"):
+        Accept(next_state=value, effects=(), receipt="r1")
+
+
+def test_decisions_reject_enum_members_with_mutable_values() -> None:
+    class MutableValueEnum(Enum):
+        AUTHORITY = {"events": []}
+
+    with pytest.raises(TypeError, match="next_state"):
+        Accept(next_state=MutableValueEnum.AUTHORITY, effects=(), receipt="r1")
 
 
 def test_all_core_dataclasses_are_frozen_slotted_and_have_no_mutable_fields() -> None:
