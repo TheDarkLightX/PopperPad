@@ -239,13 +239,18 @@ class CheckEngine:
         self, recipe_refs: tuple[Any, ...], intent: RunIntent
     ) -> tuple[tuple[str, Mapping[str, Any]], ...]:
         recipes: list[tuple[str, Mapping[str, Any]]] = []
+        seen_refs: set[str] = set()
         for ref in recipe_refs:
             if not is_ref(ref):
                 continue
-            recipe = self._pad.get_object(str(ref))
+            recipe_ref = str(ref)
+            if recipe_ref in seen_refs:
+                continue
+            seen_refs.add(recipe_ref)
+            recipe = self._pad.get_object(recipe_ref)
             if not (isinstance(recipe, Mapping) and recipe.get("schema") == SCHEMA_RECIPE_V1):
                 continue
             if not _recipe_matches_intent(recipe, intent):
                 continue
-            recipes.append((str(ref), recipe))
+            recipes.append((recipe_ref, recipe))
         return tuple(recipes)
