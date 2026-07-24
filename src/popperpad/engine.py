@@ -3,24 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
-from .core.check import (
-    AggregateVerdict,
-    CheckSummary,
-    RunIntent,
-    decide_check_summary,
-    recipe_applies,
+from .core.check import AggregateVerdict, CheckSummary, RunIntent, decide_check_summary, recipe_applies
+from .core.evidence import (
+    CapturedOutput,
+    CheckExecution,
+    ExecutionStatus,
+    PlannedCheckObjects,
+    plan_check_objects,
 )
+from .core.result import Reject
 from .core.values import thaw_json
 from .log import utc_now_iso
-from .refs import is_ref, require
+from .refs import ValidationError, is_ref, require
 from .runner import RunRecipeResult, run_recipe
-from .schemas import (
-    SCHEMA_ARTIFACT_V1,
-    SCHEMA_EDGE_V1,
-    SCHEMA_EVIDENCE_V1,
-    SCHEMA_HYPOTHESIS_V1,
-    SCHEMA_RECIPE_V1,
-)
+from .schemas import SCHEMA_HYPOTHESIS_V1, SCHEMA_RECIPE_V1
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,13 +25,15 @@ class RunResult:
     verdict: str  # PASS|FAIL|INCONCLUSIVE
     evidence_refs: tuple[str, ...]
     edge_refs: tuple[str, ...]
+    commit_root: str = ""
+    record_hash: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class _RecipeOutcome:
-    evidence_ref: str
-    edge_refs: tuple[str, ...]
+    planned: PlannedCheckObjects
     category: str  # pass|fail|inconclusive
+    blobs: tuple[tuple[str, bytes, str], ...]
 
 
 def _status_category(status: str) -> str:
@@ -48,7 +46,16 @@ def _status_category(status: str) -> str:
 
 class _PadLike(Protocol):
     def get_object(self, ref: str) -> Any: ...
-    def put_object(self, obj: Mapping[str, Any]) -> Any: ...
+    def get_blob(self, ref: str) -> bytes: ...
+    def commit_values(
+        self,
+        *,
+        objects: tuple[Mapping[str, Any], ...],
+        blobs: tuple[tuple[bytes, str], ...],
+        created_at: str | None = None,
+        policy_version: str = "popperpad-policy/v1",
+        core_version: str = "popperpad-core/v1",
+    ) -> Any: ...
 
     @property
     def cas(self) -> Any: ...
@@ -58,82 +65,69 @@ def _recipe_matches_intent(recipe: Mapping[str, Any], intent: RunIntent) -> bool
     return recipe_applies(str(recipe.get("verdict_on_pass", "support")), intent)
 
 
-def _plain_outputs(result: RunRecipeResult) -> tuple[dict[str, Any], ...]:
-    return tuple(thaw_json(output) for output in result.outputs)
+def _captured_outputs(result: RunRecipeResult) -> tuple[CapturedOutput, ...]:
+    outputs: list[CapturedOutput] = []
+    for index, frozen in enumerate(result.outputs):
+        plain = thaw_json(frozen)
+        if not isinstance(plain, Mapping):
+            raise ValidationError(f"captured output {index} is not an object")
+        try:
+            outputs.append(
+                CapturedOutput(
+                    name=str(plain["name"]),
+                    ref=str(plain["ref"]),
+                    byte_size=int(plain.get("bytes", 0)),
+                    truncated=bool(plain.get("truncated", False)),
+                    path=str(plain.get("path", plain["name"])),
+                    media_type=str(plain.get("media_type", "application/octet-stream")),
+                )
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationError(f"invalid captured output {index}: {exc}") from exc
+    return tuple(outputs)
 
 
-def _build_evidence_object(
-    *, result: RunRecipeResult, recipe_ref: str, hyp_ref: str, context_ref: str | None
-) -> dict[str, Any]:
-    evidence: dict[str, Any] = {
-        "schema": SCHEMA_EVIDENCE_V1,
-        "evidence_kind": "check",
-        "created_at": utc_now_iso(),
-        "recipe_ref": recipe_ref,
-        "context_ref": context_ref,
-        "subject_refs": [hyp_ref],
-        "result": {"status": result.status.lower(), "exit_code": result.exit_code},
-        "reason": result.reason,
-        "toolchain": thaw_json(result.toolchain),
-        "duration_ms": result.duration_ms,
-        "argv": list(result.argv),
-        "stdout_truncated": result.stdout_truncated,
-        "stderr_truncated": result.stderr_truncated,
-        "outputs": list(_plain_outputs(result)),
-    }
-    if result.stdout_ref:
-        evidence["stdout_ref"] = result.stdout_ref
-    if result.stderr_ref:
-        evidence["stderr_ref"] = result.stderr_ref
-    return evidence
-
-
-def _build_supports_edge(*, ev_ref: str, hyp_ref: str, context_ref: str | None) -> dict[str, Any]:
-    return {
-        "schema": SCHEMA_EDGE_V1,
-        "edge_type": "supports",
-        "from_ref": ev_ref,
-        "to_ref": hyp_ref,
-        "context_ref": context_ref,
-        "evidence_refs": [ev_ref],
-    }
-
-
-def _build_refutes_edge(
+def _execution_from_result(
     *,
-    pad: _PadLike,
-    ev_ref: str,
-    hyp_ref: str,
+    result: RunRecipeResult,
+    intent: RunIntent,
+    recipe_ref: str,
+    hypothesis_ref: str,
     context_ref: str | None,
-    outputs: tuple[dict[str, Any], ...],
-) -> dict[str, Any]:
-    counterexample_ref = _counterexample_ref(pad, ev_ref, outputs)
-    return {
-        "schema": SCHEMA_EDGE_V1,
-        "edge_type": "refutes",
-        "from_ref": counterexample_ref,
-        "to_ref": hyp_ref,
-        "context_ref": context_ref,
-        "evidence_refs": [ev_ref],
-    }
+    created_at: str,
+) -> CheckExecution:
+    return CheckExecution(
+        intent=intent,
+        recipe_ref=recipe_ref,
+        hypothesis_ref=hypothesis_ref,
+        context_ref=context_ref,
+        created_at=created_at,
+        status=ExecutionStatus(result.status),
+        reason=result.reason,
+        exit_code=result.exit_code,
+        stdout_ref=result.stdout_ref,
+        stderr_ref=result.stderr_ref,
+        outputs=_captured_outputs(result),
+        toolchain=result.toolchain,
+        duration_ms=result.duration_ms,
+        argv=result.argv,
+        stdout_truncated=result.stdout_truncated,
+        stderr_truncated=result.stderr_truncated,
+    )
 
 
-def _counterexample_ref(pad: _PadLike, ev_ref: str, outputs: tuple[dict[str, Any], ...]) -> str:
-    if not outputs:
-        return ev_ref
-    first = outputs[0]
-    artifact = {
-        "schema": SCHEMA_ARTIFACT_V1,
-        "name": str(first["name"]),
-        "kind": "counterexample",
-        "media_type": str(first.get("media_type", "application/octet-stream")),
-        "blob_ref": str(first["ref"]),
-    }
-    return pad.put_object(artifact).obj_ref
+def _planned_plain_objects(planned: PlannedCheckObjects) -> tuple[Mapping[str, Any], ...]:
+    objects: list[Mapping[str, Any]] = []
+    for value in planned.objects:
+        plain = thaw_json(value)
+        if not isinstance(plain, Mapping):
+            raise ValidationError("planned check object is not a mapping")
+        objects.append(plain)
+    return tuple(objects)
 
 
 class CheckEngine:
-    """Imperative interpreter for immutable recipe and evidence decisions."""
+    """Imperative interpreter for pure recipe, evidence, and commit decisions."""
 
     def __init__(self, pad: _PadLike) -> None:
         self._pad = pad
@@ -151,49 +145,95 @@ class CheckEngine:
         recipe_refs = tuple(hypothesis.get("check_recipe_refs", ()) or ())
         require(recipe_refs, "hypothesis has no check recipes")
 
+        outcomes: list[_RecipeOutcome] = []
+        for recipe in self._matching_recipes(recipe_refs, intent):
+            outcomes.append(self._run_one_recipe(recipe, intent, hyp_ref, context_ref))
+
+        categories = tuple(outcome.category for outcome in outcomes)
+        verdict = decide_check_summary(CheckSummary(intent=intent, categories=categories))
+        if not outcomes:
+            return RunResult(
+                ok=False,
+                verdict=verdict.value,
+                evidence_refs=(),
+                edge_refs=(),
+            )
+
+        object_values: list[Mapping[str, Any]] = []
         evidence_refs: list[str] = []
         edge_refs: list[str] = []
-        categories: list[str] = []
-        for recipe_ref in self._matching_recipes(recipe_refs, intent):
-            outcome = self._run_one_recipe(recipe_ref, intent, hyp_ref, context_ref)
-            evidence_refs.append(outcome.evidence_ref)
-            edge_refs.extend(outcome.edge_refs)
-            categories.append(outcome.category)
+        unique_blobs: dict[str, tuple[bytes, str]] = {}
+        for outcome in outcomes:
+            object_values.extend(_planned_plain_objects(outcome.planned))
+            evidence_refs.append(outcome.planned.evidence_ref)
+            if outcome.planned.edge_ref is not None:
+                edge_refs.append(outcome.planned.edge_ref)
+            for ref, payload, media_type in outcome.blobs:
+                unique_blobs.setdefault(ref, (payload, media_type))
 
-        verdict = decide_check_summary(CheckSummary(intent=intent, categories=tuple(categories)))
+        committed = self._pad.commit_values(
+            objects=tuple(object_values),
+            blobs=tuple(unique_blobs.values()),
+            created_at=utc_now_iso(),
+            policy_version="popperpad-check-policy/v1",
+            core_version="popperpad-core/v1",
+        )
+        expected_object_refs = tuple(
+            ref
+            for outcome in outcomes
+            for ref in (
+                outcome.planned.evidence_ref,
+                *((outcome.planned.artifact_ref,) if outcome.planned.artifact_ref else ()),
+                *((outcome.planned.edge_ref,) if outcome.planned.edge_ref else ()),
+            )
+        )
+        require(committed.object_refs == expected_object_refs, "committed check refs differ from pure plan")
+
         return RunResult(
             ok=verdict is AggregateVerdict.PASS,
             verdict=verdict.value,
             evidence_refs=tuple(evidence_refs),
             edge_refs=tuple(edge_refs),
+            commit_root=committed.commit_root,
+            record_hash=committed.record_hash,
         )
 
     def _run_one_recipe(
         self,
         recipe: tuple[str, Mapping[str, Any]],
         intent: RunIntent,
-        hyp_ref: str,
+        hypothesis_ref: str,
         context_ref: str | None,
     ) -> _RecipeOutcome:
         result = run_recipe(cas=self._pad.cas, recipe=recipe[1], bindings={}, repo_root=None)
-        evidence = _build_evidence_object(
-            result=result, recipe_ref=recipe[0], hyp_ref=hyp_ref, context_ref=context_ref
+        execution = _execution_from_result(
+            result=result,
+            intent=intent,
+            recipe_ref=recipe[0],
+            hypothesis_ref=hypothesis_ref,
+            context_ref=context_ref,
+            created_at=utc_now_iso(),
         )
-        evidence_ref = self._pad.put_object(evidence).obj_ref
-        edge_refs: tuple[str, ...] = ()
-        if result.status == "PASS":
-            edge_refs = self._emit_edges(
-                intent,
-                evidence_ref,
-                hyp_ref,
-                context_ref,
-                _plain_outputs(result),
-            )
+        planned = plan_check_objects(execution)
+        if isinstance(planned, Reject):
+            raise ValidationError(f"{planned.code}: {thaw_json(planned.details)}")
         return _RecipeOutcome(
-            evidence_ref=evidence_ref,
-            edge_refs=edge_refs,
+            planned=planned,
             category=_status_category(result.status),
+            blobs=self._result_blobs(result, execution.outputs),
         )
+
+    def _result_blobs(
+        self, result: RunRecipeResult, outputs: tuple[CapturedOutput, ...]
+    ) -> tuple[tuple[str, bytes, str], ...]:
+        blobs: list[tuple[str, bytes, str]] = []
+        if result.stdout_ref:
+            blobs.append((result.stdout_ref, self._pad.get_blob(result.stdout_ref), "text/plain; charset=utf-8"))
+        if result.stderr_ref:
+            blobs.append((result.stderr_ref, self._pad.get_blob(result.stderr_ref), "text/plain; charset=utf-8"))
+        for output in outputs:
+            blobs.append((output.ref, self._pad.get_blob(output.ref), output.media_type))
+        return tuple(blobs)
 
     def _matching_recipes(
         self, recipe_refs: tuple[Any, ...], intent: RunIntent
@@ -209,23 +249,3 @@ class CheckEngine:
                 continue
             recipes.append((str(ref), recipe))
         return tuple(recipes)
-
-    def _emit_edges(
-        self,
-        intent: RunIntent,
-        evidence_ref: str,
-        hyp_ref: str,
-        context_ref: str | None,
-        outputs: tuple[dict[str, Any], ...],
-    ) -> tuple[str, ...]:
-        if intent is RunIntent.PROVE:
-            edge = _build_supports_edge(ev_ref=evidence_ref, hyp_ref=hyp_ref, context_ref=context_ref)
-            return (self._pad.put_object(edge).obj_ref,)
-        edge = _build_refutes_edge(
-            pad=self._pad,
-            ev_ref=evidence_ref,
-            hyp_ref=hyp_ref,
-            context_ref=context_ref,
-            outputs=outputs,
-        )
-        return (self._pad.put_object(edge).obj_ref,)
