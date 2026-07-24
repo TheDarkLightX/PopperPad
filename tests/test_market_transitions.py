@@ -391,3 +391,129 @@ def test_terms_reject_illegal_states_at_construction() -> None:
             accepted_recipe_refs=frozenset({R("c")}),
             accepted_verifier_refs=frozenset({R("d")}),
         )
+
+
+def test_open_challenge_remains_resolvable_after_window_closes() -> None:
+    challenged = apply_market_command(
+        verified_state(),
+        OpenChallenge(
+            "cmd-challenge-late-resolution",
+            "challenge-late-resolution",
+            "submission-1",
+            "did:example:challenger",
+            "unavailable_artifact",
+            (R("2"),),
+            Amount(50),
+            1_050,
+        ),
+        policy(),
+    )
+    assert isinstance(challenged, Accept)
+
+    blocked = apply_market_command(
+        challenged.next_state,
+        AdvanceBounty("cmd-advance-before-resolution", 1_101),
+        policy(),
+    )
+    assert isinstance(blocked, Reject)
+    assert blocked.code == "POLICY_MISMATCH"
+
+    resolved = apply_market_command(
+        challenged.next_state,
+        ResolveChallenge(
+            "cmd-resolve-after-window",
+            "challenge-late-resolution",
+            R("d"),
+            R("3"),
+            False,
+            1_500,
+        ),
+        policy(),
+    )
+    assert isinstance(resolved, CommittedFailure)
+    assert resolved.code == "CHALLENGE_REJECTED"
+
+    payable = apply_market_command(
+        resolved.next_state,
+        AdvanceBounty("cmd-advance-after-resolution", 1_501),
+        policy(),
+    )
+    assert isinstance(payable, Accept)
+    assert payable.next_state.phase is BountyPhase.PAYABLE
+
+
+def test_new_challenge_is_still_rejected_after_opening_window() -> None:
+    rejected = apply_market_command(
+        verified_state(),
+        OpenChallenge(
+            "cmd-too-late-challenge",
+            "challenge-too-late",
+            "submission-1",
+            "did:example:challenger",
+            "invalid_signature",
+            (R("2"),),
+            Amount(50),
+            1_101,
+        ),
+        policy(),
+    )
+    assert isinstance(rejected, Reject)
+    assert rejected.code == "TIME_WINDOW"
+
+
+def test_bounty_state_constructor_rejects_phase_inconsistent_states() -> None:
+    with pytest.raises(ValueError, match="open_without_escrow"):
+        BountyState(terms=terms(), phase=BountyPhase.OPEN)
+
+    with pytest.raises(ValueError, match="settled_without_payable_submission"):
+        BountyState(
+            terms=terms(),
+            phase=BountyPhase.SETTLED,
+            settlement_ref="chain:tx:1",
+        )
+
+
+def test_bounty_state_rejects_challenge_for_unknown_submission() -> None:
+    from popperpad.core.market import ChallengeState, ChallengeStatus
+
+    challenge = ChallengeState(
+        challenge_id="challenge-orphan",
+        submission_id="missing-submission",
+        challenger_ref="did:example:challenger",
+        finding_kind="invalid_signature",
+        evidence_refs=(R("2"),),
+        opened_at=500,
+        status=ChallengeStatus.OPEN,
+        deposit_locked=Amount(50),
+    )
+    with pytest.raises(ValueError, match="challenge_unknown_submission"):
+        BountyState(
+            terms=terms(),
+            phase=BountyPhase.OPEN,
+            escrow_locked=Amount(1_000),
+            challenges=(challenge,),
+        )
+
+
+def test_bounty_state_owns_top_level_collection_aliases() -> None:
+    submissions: list = []
+    challenges: list = []
+    payable: list[str] = []
+    processed = {"cmd-open-alias"}
+    state = BountyState(
+        terms=terms(),
+        phase=BountyPhase.OPEN,
+        escrow_locked=Amount(1_000),
+        submissions=submissions,  # type: ignore[arg-type]
+        challenges=challenges,  # type: ignore[arg-type]
+        payable_submission_ids=payable,  # type: ignore[arg-type]
+        processed_command_ids=processed,  # type: ignore[arg-type]
+    )
+    submissions.append("mutated")
+    challenges.append("mutated")
+    payable.append("mutated")
+    processed.add("mutated")
+    assert state.submissions == ()
+    assert state.challenges == ()
+    assert state.payable_submission_ids == ()
+    assert state.processed_command_ids == frozenset({"cmd-open-alias"})
