@@ -7,13 +7,14 @@ import shell adapters.
 """
 
 from .result import Accept, CommittedFailure, Decision, Reject
-from .values import Amount, FrozenDict, JsonValue, freeze_json, thaw_json
+from .values import Amount, DeeplyImmutable, FrozenDict, JsonValue, freeze_json, thaw_json
 
 __all__ = [
     "Accept",
     "Amount",
     "CommittedFailure",
     "Decision",
+    "DeeplyImmutable",
     "FrozenDict",
     "JsonValue",
     "Reject",

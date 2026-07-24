@@ -162,7 +162,7 @@ class CheckEngine:
 
         verdict = decide_check_summary(CheckSummary(intent=intent, categories=tuple(categories)))
         return RunResult(
-            ok=verdict is AggregateVerdict.PASS,
+            ok=verdict == AggregateVerdict.PASS,
             verdict=verdict.value,
             evidence_refs=tuple(evidence_refs),
             edge_refs=tuple(edge_refs),
@@ -218,7 +218,7 @@ class CheckEngine:
         context_ref: str | None,
         outputs: tuple[dict[str, Any], ...],
     ) -> tuple[str, ...]:
-        if intent is RunIntent.PROVE:
+        if intent == RunIntent.PROVE:
             edge = _build_supports_edge(ev_ref=evidence_ref, hyp_ref=hyp_ref, context_ref=context_ref)
             return (self._pad.put_object(edge).obj_ref,)
         edge = _build_refutes_edge(

@@ -9,8 +9,22 @@ from typing import Any, Generic, TypeAlias, TypeVar, cast
 V = TypeVar("V")
 
 
+class DeeplyImmutable:
+    """Marker and runtime guard for owned functional-core value graphs."""
+
+    __slots__ = ()
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if not is_deeply_immutable(value):
+                raise TypeError(
+                    f"{type(self).__name__}.{field.name} must be deeply immutable"
+                )
+
+
 @dataclass(frozen=True, slots=True, init=False)
-class FrozenDict(Mapping[str, V], Generic[V]):
+class FrozenDict(DeeplyImmutable, Mapping[str, V], Generic[V]):
     """Small immutable mapping with canonical key order and owned entries.
 
     The constructor copies the supplied mapping/iterable, rejects duplicate or
@@ -111,14 +125,16 @@ def is_deeply_immutable(value: Any, *, _seen: frozenset[int] = frozenset()) -> b
         return all(is_deeply_immutable(child, _seen=seen) for _key, child in value.items_tuple())
     if is_dataclass(value) and not isinstance(value, type):
         params = getattr(type(value), "__dataclass_params__", None)
-        return bool(params and params.frozen) and not hasattr(value, "__dict__") and all(
+        return isinstance(value, DeeplyImmutable) and bool(
+            params and params.frozen
+        ) and not hasattr(value, "__dict__") and all(
             is_deeply_immutable(getattr(value, field.name), _seen=seen) for field in fields(value)
         )
     return False
 
 
 @dataclass(frozen=True, slots=True, order=True)
-class Amount:
+class Amount(DeeplyImmutable):
     """An exact non-negative protocol quantity measured in declared atoms."""
 
     atoms: int
@@ -128,6 +144,7 @@ class Amount:
             raise TypeError("amount atoms must be an integer")
         if self.atoms < 0:
             raise ValueError("amount atoms must be non-negative")
+        DeeplyImmutable.__post_init__(self)
 
     @classmethod
     def zero(cls) -> "Amount":
