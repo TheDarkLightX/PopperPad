@@ -7,39 +7,27 @@ from typing import ClassVar
 from .check import RunIntent
 from .codec import canonical_json_bytes, sha256_bytes
 from .result import Reject
-from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json
+from .values import ClosedStrEnum, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-@dataclass(frozen=True, slots=True)
-class ExecutionStatus(DeeplyImmutable):
-    value: str
+class ExecutionStatus(ClosedStrEnum):
+    __slots__ = ()
 
     PASS: ClassVar[ExecutionStatus]
     FAIL: ClassVar[ExecutionStatus]
     SKIP: ClassVar[ExecutionStatus]
     TIMEOUT: ClassVar[ExecutionStatus]
     ERROR: ClassVar[ExecutionStatus]
-
-    def __post_init__(self) -> None:
-        if type(self.value) is not str or self.value not in {
-            "PASS",
-            "FAIL",
-            "SKIP",
-            "TIMEOUT",
-            "ERROR",
-        }:
-            raise ValueError("invalid execution status")
-        DeeplyImmutable.__post_init__(self)
-
-
-ExecutionStatus.PASS = ExecutionStatus("PASS")
-ExecutionStatus.FAIL = ExecutionStatus("FAIL")
-ExecutionStatus.SKIP = ExecutionStatus("SKIP")
-ExecutionStatus.TIMEOUT = ExecutionStatus("TIMEOUT")
-ExecutionStatus.ERROR = ExecutionStatus("ERROR")
+    _symbols = (
+        ("PASS", "PASS"),
+        ("FAIL", "FAIL"),
+        ("SKIP", "SKIP"),
+        ("TIMEOUT", "TIMEOUT"),
+        ("ERROR", "ERROR"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,10 +211,10 @@ def plan_check_objects(execution: CheckExecution) -> PlannedCheckObjects | Rejec
     objects: list[FrozenDict[JsonValue]] = [evidence]
     artifact_ref: str | None = None
     edge_ref: str | None = None
-    if execution.status != ExecutionStatus.PASS:
+    if execution.status is not ExecutionStatus.PASS:
         return PlannedCheckObjects(tuple(objects), evidence_ref, None, None)
 
-    if execution.intent == RunIntent.PROVE:
+    if execution.intent is RunIntent.PROVE:
         edge_from_ref = evidence_ref
         edge_type = "supports"
     else:
