@@ -176,7 +176,15 @@ def _validate_recipe(obj: Mapping[str, Any]) -> None:
     _require_str_list(obj.get("requires", []), "recipe.requires items must be strings")
     _require_str_list(obj.get("requires_paths", []), "recipe.requires_paths items must be strings")
 
-    require_mapping(obj.get("env", {}), "recipe.env must be an object")
+    env = obj.get("env", {})
+    require_mapping(env, "recipe.env must be an object")
+    for key, value in env.items():
+        require_str(key, "recipe.env keys must be strings")
+        require(bool(key), "recipe.env keys must be non-empty")
+        require(
+  value is None or isinstance(value, str),
+  "recipe.env values must be strings or null",
+        )
 
     files = obj.get("files", {})
     require_mapping(files, "recipe.files must be an object")
