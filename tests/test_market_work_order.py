@@ -27,10 +27,10 @@ def _work_order() -> dict[str, object]:
         "payout_condition": "valid_counterexample",
         "challenge_window_seconds": 604800,
         "scoring": {
-            "novelty_weight": 0.30,
-            "minimality_weight": 0.20,
-            "severity_weight": 0.30,
-            "reproducibility_weight": 0.20,
+            "novelty_weight_bps": 3000,
+            "minimality_weight_bps": 2000,
+            "severity_weight_bps": 3000,
+            "reproducibility_weight_bps": 2000,
         },
     }
 
@@ -43,6 +43,19 @@ def test_market_work_order_validates_and_can_be_stored() -> None:
         pad.init()
         rep = pad.put_object(_work_order())
         assert rep.obj_ref.startswith("sha256:")
+        pad.doctor(strict=True)
+
+
+def test_legacy_float_scoring_value_remains_storable() -> None:
+    from popperpad.pad import PopperPad
+
+    obj = _work_order()
+    obj["scoring"] = {"novelty_weight": 0.30}
+    with tempfile.TemporaryDirectory() as td:
+        pad = PopperPad(root=Path(td) / "pad")
+        pad.init()
+        rep = pad.put_object(obj)
+        assert pad.get_object(rep.obj_ref) == obj
         pad.doctor(strict=True)
 
 
@@ -59,7 +72,7 @@ def test_market_work_order_rejects_negative_scoring_weight() -> None:
     from popperpad.validate import validate_object
 
     obj = _work_order()
-    obj["scoring"] = {"novelty_weight": -0.1}
+    obj["scoring"] = {"novelty_weight_bps": -1}
     with pytest.raises(ValueError, match="scoring values"):
         validate_object(obj)
 

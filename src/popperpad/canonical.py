@@ -1,29 +1,50 @@
-from __future__ import annotations
+"""Versioned commitments plus the byte-compatible v1 JSON surface."""
 
-import hashlib
 import json
 from typing import Any
 
+from .core.codec import (
+    CANONICAL_JSON_VERSION,
+    canonical_hash,
+    domain_sha256,
+    sha256_bytes,
+)
+
 
 def canonical_json_bytes(obj: Any) -> bytes:
-    """
-    Canonical JSON bytes used by PopperPad hashing.
+    """Encode the original v1 PopperPad JSON format byte-for-byte.
 
-    Notes:
-    - This is a deterministic, language-agnostic *spec* only if other implementations
-      follow the same serialization rules. We intentionally disallow NaN/Inf.
-    - If you need RFC8785 (JCS) compatibility across non-Python implementations,
-      treat this function as the norm and reimplement it byte-for-byte elsewhere.
+    Existing schemas and pads may contain finite JSON floats. New FCIS core
+    commitments use ``popperpad.core.codec.canonical_json_bytes`` and reject
+    binary floating point before encoding.
     """
-    return (json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False) + "\n").encode(
-        "utf-8"
+
+    encoded = json.dumps(
+        obj,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
     )
+    return (encoded + "\n").encode("utf-8")
 
 
-def sha256_bytes(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+def stable_sha256(obj: object) -> str:
+    """Legacy canonical JSON hash retained for v1 object/log compatibility.
 
+    New authority-bearing commitments must call ``canonical_hash`` with an
+    explicit semantic domain. Keeping this function byte-compatible avoids
+    invalidating existing v1 pads during the FCIS migration.
+    """
 
-def stable_sha256(obj: Any) -> str:
     return sha256_bytes(canonical_json_bytes(obj))
 
+
+__all__ = [
+    "CANONICAL_JSON_VERSION",
+    "canonical_hash",
+    "canonical_json_bytes",
+    "domain_sha256",
+    "sha256_bytes",
+    "stable_sha256",
+]

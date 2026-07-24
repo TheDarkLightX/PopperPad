@@ -27,7 +27,8 @@ def _score_event() -> dict[str, object]:
         "token_reward": "12 AGRS",
         "anti_abuse": {
             "verifier_required": True,
-            "sybil_risk": 0.05,
+            "sybil_risk": 500,
+            "sybil_risk_scale": "basis_points",
         },
         "truth_boundary": "gamification_only",
     }
