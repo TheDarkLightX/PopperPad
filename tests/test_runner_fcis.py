@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from popperpad.cas import ContentAddressedStore
+from popperpad.core.recipe import RecipePlan, plan_recipe
+from popperpad.core.result import Reject
+from popperpad.core.values import FrozenDict
+from popperpad.runner import run_recipe
+
+
+def test_invalid_recipe_is_a_rejection_value() -> None:
+    result = plan_recipe({"argv": ["tool"], "capture_paths": ["../escape"]})
+    assert isinstance(result, Reject)
+    assert result.code == "INVALID_RECIPE"
+
+
+def test_runner_does_not_inherit_unrequested_host_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POPPERPAD_TEST_SECRET", "must-not-cross-boundary")
+    cas = ContentAddressedStore(root=tmp_path / "cas")
+    result = run_recipe(
+        cas=cas,
+        recipe={
+            "argv": [
+                "${PYTHON}",
+                "-c",
+                "import os; print(os.environ.get('POPPERPAD_TEST_SECRET', 'absent'))",
+            ],
+            "expect": {"exit_code": 0, "stdout_contains": "absent"},
+        },
+    )
+    assert result.status == "PASS"
+    assert b"must-not-cross-boundary" not in cas.get_bytes(result.stdout_ref)
+
+
+def test_recipe_can_receive_only_explicit_environment_values(tmp_path: Path) -> None:
+    cas = ContentAddressedStore(root=tmp_path / "cas")
+    result = run_recipe(
+        cas=cas,
+        recipe={
+            "argv": ["${PYTHON}", "-c", "import os; print(os.environ['MODE'])"],
+            "env": {"MODE": "verify"},
+            "expect": {"exit_code": 0, "stdout_contains": "verify"},
+        },
+    )
+    assert result.status == "PASS"
+
+
+def test_runner_result_is_transitively_immutable(tmp_path: Path) -> None:
+    cas = ContentAddressedStore(root=tmp_path / "cas")
+    result = run_recipe(
+        cas=cas,
+        recipe={
+            "argv": ["${PYTHON}", "-c", "open('out.txt','w').write('witness')"],
+            "capture_paths": ["out.txt"],
+            "expect": {"exit_code": 0},
+        },
+    )
+    assert result.status == "PASS"
+    assert isinstance(result.toolchain, FrozenDict)
+    assert isinstance(result.outputs, tuple)
+    assert isinstance(result.outputs[0], FrozenDict)
+    with pytest.raises(TypeError):
+        result.outputs[0]["name"] = "changed"  # type: ignore[index]
+
+
+def test_plan_is_independent_of_later_input_mutation() -> None:
+    argv = ["tool"]
+    raw = {"argv": argv, "expect": {"exit_code": 0}}
+    result = plan_recipe(raw)
+    assert isinstance(result, RecipePlan)
+    argv.append("--mutated")
+    assert result.argv == ("tool",)
