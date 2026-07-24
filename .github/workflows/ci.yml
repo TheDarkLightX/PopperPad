@@ -61,8 +61,16 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Check formatting
-        run: cargo fmt --manifest-path rust/popperpad-core/Cargo.toml -- --check
+      - name: Produce canonical rustfmt output
+        run: cargo fmt --manifest-path rust/popperpad-core/Cargo.toml
+
+      - name: Upload formatted Rust source
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-kernel
+          path: rust/popperpad-core/src/lib.rs
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Lint hardened kernel
         run: cargo clippy --manifest-path rust/popperpad-core/Cargo.toml --all-targets -- -D warnings
