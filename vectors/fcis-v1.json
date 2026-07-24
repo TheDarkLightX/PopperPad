@@ -90,7 +90,7 @@
         ],
         "blobs": [
           {
-            "payload_utf8": "witness: x=17\n",
+            "payload_bytes": [119, 105, 116, 110, 101, 115, 115, 58, 32, 120, 61, 49, 55, 10],
             "media_type": "text/plain"
           }
         ],
