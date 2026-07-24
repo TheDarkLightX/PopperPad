@@ -172,6 +172,18 @@ def test_committed_failure_rejects_mutable_authority_payloads() -> None:
         )
 
 
+def test_decisions_reject_frozen_dataclasses_with_writable_instance_dicts() -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ShallowFrozenState:
+        balance: int
+
+    state = ShallowFrozenState(10)
+    state.__dict__["balance"] = 999
+    assert state.balance == 999
+    with pytest.raises(TypeError, match="next_state"):
+        Accept(next_state=state, effects=(), receipt="r1")
+
+
 def test_all_core_dataclasses_are_frozen_slotted_and_have_no_mutable_fields() -> None:
     for module_name in CORE_MODULES:
         module = importlib.import_module(module_name)

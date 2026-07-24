@@ -186,7 +186,7 @@ pub enum Decision<State, Effect, Receipt> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct BlobInput {
-    pub payload_utf8: String,
+    pub payload_bytes: Vec<u8>,
     pub media_type: String,
 }
 
@@ -253,24 +253,24 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
     if !valid_ref_or_empty(&input.expected_head) {
         return Err(CoreError::InvalidPreStateRoot);
     }
-    if !valid_ref_or_empty(&input.evidence_root) {
-        return Err(CoreError::InvalidEvidenceRoot);
-    }
     if input.created_at.is_empty() {
         return Err(CoreError::InvalidCreatedAt);
+    }
+    if !valid_ref_or_empty(&input.evidence_root) {
+        return Err(CoreError::InvalidEvidenceRoot);
     }
 
     let mut seen_refs = HashSet::new();
     let mut object_rows = Vec::with_capacity(input.objects.len());
     let mut object_refs = Vec::with_capacity(input.objects.len());
     for object in &input.objects {
+        let payload = canonical_object_bytes(object)?;
         let schema = object
             .as_object()
             .and_then(|mapping| mapping.get("schema"))
             .and_then(Value::as_str)
             .filter(|schema| !schema.is_empty())
             .ok_or(CoreError::InvalidObjectSchema)?;
-        let payload = canonical_json_bytes(object)?;
         let reference = sha256_bytes(&payload);
         if !seen_refs.insert(reference.clone()) {
             return Err(CoreError::DuplicateWrite(reference));
@@ -285,7 +285,7 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         if blob.media_type.is_empty() {
             return Err(CoreError::InvalidMediaType);
         }
-        let payload = blob.payload_utf8.as_bytes();
+        let payload = &blob.payload_bytes;
         let reference = sha256_bytes(payload);
         if !seen_refs.insert(reference.clone()) {
             return Err(CoreError::DuplicateWrite(reference));
@@ -320,6 +320,7 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         if !effect.payload.is_object() {
             return Err(CoreError::InvalidObject);
         }
+        canonical_object_bytes(&effect.payload)?;
         let effect_id = canonical_hash(
             "outbox-effect-id/v1",
             &json!({
@@ -391,6 +392,16 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         commit_root,
         record_hash,
         record_canonical_utf8,
+    })
+}
+
+fn canonical_object_bytes(value: &Value) -> Result<Vec<u8>, CoreError> {
+    if !value.is_object() {
+        return Err(CoreError::InvalidObject);
+    }
+    canonical_json_bytes(value).map_err(|error| match error {
+        CoreError::FloatingPointNotAllowed => CoreError::InvalidObject,
+        other => other,
     })
 }
 
@@ -528,13 +539,53 @@ mod tests {
     }
 
     #[test]
+    fn malformed_header_precedence_matches_python() {
+        let mut input = minimal_commit_input();
+        input.created_at.clear();
+        input.evidence_root = "not-a-ref".to_owned();
+        assert_eq!(plan_commit(&input), Err(CoreError::InvalidCreatedAt));
+    }
+
+    #[test]
     fn empty_blob_media_type_matches_python_rejection() {
         let mut input = minimal_commit_input();
         input.blobs.push(BlobInput {
-            payload_utf8: "blob".to_owned(),
+            payload_bytes: b"blob".to_vec(),
             media_type: String::new(),
         });
         assert_eq!(plan_commit(&input), Err(CoreError::InvalidMediaType));
+    }
+
+    #[test]
+    fn arbitrary_binary_blob_matches_python_bytes_model() {
+        let mut input = minimal_commit_input();
+        let payload = vec![0xff, 0x00, 0x80, b'X'];
+        input.blobs.push(BlobInput {
+            payload_bytes: payload.clone(),
+            media_type: "application/octet-stream".to_owned(),
+        });
+        let planned = plan_commit(&input).unwrap();
+        assert_eq!(planned.blob_refs, vec![sha256_bytes(&payload)]);
+    }
+
+    #[test]
+    fn malformed_objects_match_python_rejections() {
+        let mut scalar = minimal_commit_input();
+        scalar.objects.push(json!(1));
+        assert_eq!(plan_commit(&scalar), Err(CoreError::InvalidObject));
+
+        let mut floating_object = minimal_commit_input();
+        floating_object
+            .objects
+            .push(json!({"schema": "example/v1", "weight": 0.5}));
+        assert_eq!(plan_commit(&floating_object), Err(CoreError::InvalidObject));
+
+        let mut floating_effect = minimal_commit_input();
+        floating_effect.outbox.push(OutboxInput {
+            kind: "notify".to_owned(),
+            payload: json!({"weight": 0.5}),
+        });
+        assert_eq!(plan_commit(&floating_effect), Err(CoreError::InvalidObject));
     }
 
     #[test]

@@ -67,9 +67,13 @@ def test_commit_plan_rejects_inexact_or_duplicate_authoritative_values() -> None
     (
         ({"evidence_root": "not-a-ref"}, "INVALID_EVIDENCE_ROOT"),
         ({"created_at": ""}, "INVALID_CREATED_AT"),
+        ({"created_at": "", "evidence_root": "not-a-ref"}, "INVALID_CREATED_AT"),
+        ({"objects": (1,)}, "INVALID_OBJECT"),
+        ({"objects": ({"schema": "example/v1", "weight": 0.5},)}, "INVALID_OBJECT"),
         ({"blobs": ((b"blob", ""),)}, "INVALID_MEDIA_TYPE"),
         ({"outbox": (("", {}),)}, "INVALID_EFFECT"),
         ({"outbox": (("notify", 1),)}, "INVALID_OBJECT"),
+        ({"outbox": (("notify", {"weight": 0.5}),)}, "INVALID_OBJECT"),
     ),
 )
 def test_python_planner_rejects_rust_parity_boundaries(
