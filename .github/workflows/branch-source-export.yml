@@ -28,4 +28,5 @@ jobs:
             pyproject.toml
             rust
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 1
