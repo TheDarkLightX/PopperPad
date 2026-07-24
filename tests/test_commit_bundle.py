@@ -62,6 +62,29 @@ def test_commit_plan_rejects_inexact_or_duplicate_authoritative_values() -> None
     assert duplicate.code == "DUPLICATE_WRITE"
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_code"),
+    (
+        ({"evidence_root": "not-a-ref"}, "INVALID_EVIDENCE_ROOT"),
+        ({"created_at": ""}, "INVALID_CREATED_AT"),
+        ({"blobs": ((b"blob", ""),)}, "INVALID_MEDIA_TYPE"),
+        ({"outbox": (("", {}),)}, "INVALID_EFFECT"),
+        ({"outbox": (("notify", 1),)}, "INVALID_OBJECT"),
+    ),
+)
+def test_python_planner_rejects_rust_parity_boundaries(
+    overrides: dict[str, object], expected_code: str
+) -> None:
+    kwargs: dict[str, object] = {
+        "expected_head": "",
+        "created_at": "2026-07-24T00:00:00Z",
+    }
+    kwargs.update(overrides)
+    planned = plan_commit(**kwargs)  # type: ignore[arg-type]
+    assert isinstance(planned, Reject)
+    assert planned.code == expected_code
+
+
 def test_batch_commit_has_one_physical_record_and_legacy_logical_projection(tmp_path: Path) -> None:
     pad = PopperPad(root=tmp_path / "pad")
     pad.init()
