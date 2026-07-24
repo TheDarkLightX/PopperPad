@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from .codec import canonical_hash, canonical_json_bytes, sha256_bytes
 from .result import Reject
-from .values import FrozenDict, JsonValue, freeze_json, thaw_json
+from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json, thaw_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -14,28 +14,28 @@ _LOG_SCHEMA_V2 = "popperpad/log_record/v2"
 
 
 @dataclass(frozen=True, slots=True)
-class ObjectWrite:
+class ObjectWrite(DeeplyImmutable):
     ref: str
     schema: str
     payload: bytes
 
 
 @dataclass(frozen=True, slots=True)
-class BlobWrite:
+class BlobWrite(DeeplyImmutable):
     ref: str
     media_type: str
     payload: bytes
 
 
 @dataclass(frozen=True, slots=True)
-class OutboxEffect:
+class OutboxEffect(DeeplyImmutable):
     effect_id: str
     kind: str
     payload: FrozenDict[JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
-class ReceiptDraft:
+class ReceiptDraft(DeeplyImmutable):
     version: str
     pre_state_root: str
     command_hash: str
@@ -65,7 +65,7 @@ class ReceiptDraft:
 
 
 @dataclass(frozen=True, slots=True)
-class CommitBundle:
+class CommitBundle(DeeplyImmutable):
     expected_head: str
     commit_root: str
     record_hash: str

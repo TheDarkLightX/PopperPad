@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .values import Amount
+from .values import Amount, DeeplyImmutable
 
 
 @dataclass(frozen=True, slots=True)
-class TreasuryEpoch:
+class TreasuryEpoch(DeeplyImmutable):
     name: str
     starting_balance: Amount
     inflows: Amount
@@ -15,7 +15,7 @@ class TreasuryEpoch:
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceBudget:
+class ResourceBudget(DeeplyImmutable):
     budget_id: str
     funded: Amount
     compute: Amount
@@ -26,14 +26,14 @@ class ResourceBudget:
 
 
 @dataclass(frozen=True, slots=True)
-class EarnPath:
+class EarnPath(DeeplyImmutable):
     name: str
     earned_credits: Amount
     minimum_agent_run_cost: Amount
 
 
 @dataclass(frozen=True, slots=True)
-class CertificateCase:
+class CertificateCase(DeeplyImmutable):
     name: str
     payment_offered: Amount
     verifier_accepted: bool
@@ -42,7 +42,7 @@ class CertificateCase:
 
 
 @dataclass(frozen=True, slots=True)
-class TruthBoundaryInputs:
+class TruthBoundaryInputs(DeeplyImmutable):
     stake_changed: bool = False
     verifier_result_changed: bool = False
     local_status_inputs_changed: bool = False

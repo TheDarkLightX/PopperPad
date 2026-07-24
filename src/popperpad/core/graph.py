@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .values import DeeplyImmutable
+
 
 @dataclass(frozen=True, slots=True)
-class RecipeRecord:
+class RecipeRecord(DeeplyImmutable):
     ref: str
     verdict_on_pass: str
 
 
 @dataclass(frozen=True, slots=True)
-class EvidenceRecord:
+class EvidenceRecord(DeeplyImmutable):
     ref: str
     recipe_ref: str
     context_ref: str | None
@@ -19,7 +21,7 @@ class EvidenceRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class TruthEdge:
+class TruthEdge(DeeplyImmutable):
     ref: str
     kind: str  # supports|refutes
     from_ref: str
@@ -29,7 +31,7 @@ class TruthEdge:
 
 
 @dataclass(frozen=True, slots=True)
-class StatusSnapshot:
+class StatusSnapshot(DeeplyImmutable):
     hypothesis_ref: str
     context_ref: str | None
     accepted_recipe_refs: frozenset[str]
@@ -39,20 +41,20 @@ class StatusSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class StatusResult:
+class StatusResult(DeeplyImmutable):
     state: str  # unknown|supported|falsified|disputed
     supports: tuple[str, ...]
     refutes: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class Obligation:
+class Obligation(DeeplyImmutable):
     obligation_id: str
     recipe_ref: str
 
 
 @dataclass(frozen=True, slots=True)
-class SemanticEdge:
+class SemanticEdge(DeeplyImmutable):
     ref: str
     from_ref: str
     to_ref: str
@@ -62,20 +64,20 @@ class SemanticEdge:
 
 
 @dataclass(frozen=True, slots=True)
-class TransferSnapshot:
+class TransferSnapshot(DeeplyImmutable):
     edges: tuple[SemanticEdge, ...]
     evidence: tuple[EvidenceRecord, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class OpenObligation:
+class OpenObligation(DeeplyImmutable):
     edge_ref: str
     obligation_id: str
     recipe_ref: str
 
 
 @dataclass(frozen=True, slots=True)
-class TransferPath:
+class TransferPath(DeeplyImmutable):
     edge_refs: tuple[str, ...]
     obligations_open: tuple[OpenObligation, ...]
 

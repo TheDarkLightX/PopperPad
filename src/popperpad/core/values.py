@@ -118,8 +118,28 @@ def is_deeply_immutable(value: Any, *, _seen: frozenset[int] = frozenset()) -> b
     return False
 
 
+class DeeplyImmutable:
+    """Runtime guard for owned, transitively immutable core values.
+
+    ``frozen=True`` prevents attribute rebinding but does not make a retained
+    list, mapping, or mutable child immutable. Core value constructors inherit
+    this guard so an invalid reachable object graph is rejected at the boundary
+    instead of becoming mutable authority state.
+    """
+
+    __slots__ = ()
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if not is_deeply_immutable(value):
+                raise TypeError(
+                    f"{type(self).__name__}.{field.name} must be deeply immutable"
+                )
+
+
 @dataclass(frozen=True, slots=True, order=True)
-class Amount:
+class Amount(DeeplyImmutable):
     """An exact non-negative protocol quantity measured in declared atoms."""
 
     atoms: int
@@ -129,6 +149,7 @@ class Amount:
             raise TypeError("amount atoms must be an integer")
         if self.atoms < 0:
             raise ValueError("amount atoms must be non-negative")
+        DeeplyImmutable.__post_init__(self)
 
     @classmethod
     def zero(cls) -> "Amount":

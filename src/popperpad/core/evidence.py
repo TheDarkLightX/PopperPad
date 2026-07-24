@@ -7,7 +7,7 @@ from enum import Enum
 from .check import RunIntent
 from .codec import canonical_json_bytes, sha256_bytes
 from .result import Reject
-from .values import FrozenDict, JsonValue, freeze_json
+from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 _REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -22,7 +22,7 @@ class ExecutionStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class CapturedOutput:
+class CapturedOutput(DeeplyImmutable):
     name: str
     ref: str
     byte_size: int
@@ -46,7 +46,7 @@ class CapturedOutput:
 
 
 @dataclass(frozen=True, slots=True)
-class CheckExecution:
+class CheckExecution(DeeplyImmutable):
     intent: RunIntent
     recipe_ref: str
     hypothesis_ref: str
@@ -66,7 +66,7 @@ class CheckExecution:
 
 
 @dataclass(frozen=True, slots=True)
-class PlannedCheckObjects:
+class PlannedCheckObjects(DeeplyImmutable):
     objects: tuple[FrozenDict[JsonValue], ...]
     evidence_ref: str
     artifact_ref: str | None

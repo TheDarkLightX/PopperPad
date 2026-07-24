@@ -11,7 +11,11 @@ import pytest
 
 from popperpad.core import Accept, Amount, CommittedFailure, FrozenDict, Reject, freeze_json, thaw_json
 from popperpad.core.check import AggregateVerdict, CheckSummary, RunIntent, decide_check_summary
+from popperpad.core.commit import CommitBundle
+from popperpad.core.graph import StatusSnapshot
+from popperpad.core.outbox import CommittedEffect, OutboxSnapshot
 from popperpad.core.recipe import ProcessObservation, RecipePlan, evaluate_observation, plan_recipe
+from popperpad.core.values import DeeplyImmutable
 
 
 CORE_MODULES = (
@@ -175,7 +179,56 @@ def test_committed_failure_rejects_mutable_authority_payloads() -> None:
         )
 
 
-def test_all_core_dataclasses_are_frozen_slotted_and_have_no_mutable_fields() -> None:
+@pytest.mark.parametrize(
+    ("factory", "field"),
+    (
+        (
+            lambda: OutboxSnapshot(effects=[], acknowledgements=()),  # type: ignore[arg-type]
+            "effects",
+        ),
+        (
+            lambda: StatusSnapshot(  # type: ignore[arg-type]
+                hypothesis_ref="h",
+                context_ref=None,
+                accepted_recipe_refs=frozenset(),
+                edges=[],
+                evidence=(),
+                recipes=(),
+            ),
+            "edges",
+        ),
+    ),
+)
+def test_core_snapshots_reject_retained_mutable_aliases(factory: object, field: str) -> None:
+    with pytest.raises(TypeError, match=field):
+        factory()  # type: ignore[operator]
+
+
+def test_core_effects_reject_mutable_nested_authority() -> None:
+    with pytest.raises(TypeError, match="payload"):
+        CommittedEffect(
+            effect_id="sha256:" + "a" * 64,
+            commit_record_hash="sha256:" + "b" * 64,
+            kind="notify",
+            payload={"message": []},  # type: ignore[arg-type]
+        )
+
+
+def test_commit_bundle_rejects_mutable_plan_aliases() -> None:
+    with pytest.raises(TypeError, match="objects"):
+        CommitBundle(  # type: ignore[arg-type]
+            expected_head="",
+            commit_root="sha256:" + "a" * 64,
+            record_hash="sha256:" + "b" * 64,
+            objects=[],
+            blobs=(),
+            outbox=(),
+            receipt="immutable",
+            record=FrozenDict(),
+        )
+
+
+def test_all_core_dataclasses_are_runtime_guarded_frozen_slotted_and_typed_immutable() -> None:
     for module_name in CORE_MODULES:
         module = importlib.import_module(module_name)
         for _name, cls in inspect.getmembers(module, inspect.isclass):
@@ -184,6 +237,10 @@ def test_all_core_dataclasses_are_frozen_slotted_and_have_no_mutable_fields() ->
             params = cls.__dataclass_params__
             assert params.frozen, f"{module_name}.{cls.__name__} is not frozen"
             assert hasattr(cls, "__slots__"), f"{module_name}.{cls.__name__} is not slotted"
+            if cls is not FrozenDict:
+                assert issubclass(cls, DeeplyImmutable), (
+                    f"{module_name}.{cls.__name__} lacks the runtime deep-immutability guard"
+                )
             for field_name, annotation in get_type_hints(cls).items():
                 assert not _annotation_contains_mutable(annotation), (
                     f"{module_name}.{cls.__name__}.{field_name} exposes a mutable container"

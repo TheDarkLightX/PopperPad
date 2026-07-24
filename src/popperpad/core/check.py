@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from .values import DeeplyImmutable
+
 
 class RunIntent(str, Enum):
     PROVE = "prove"
@@ -16,7 +18,7 @@ class AggregateVerdict(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class CheckSummary:
+class CheckSummary(DeeplyImmutable):
     intent: RunIntent
     categories: tuple[str, ...]
 

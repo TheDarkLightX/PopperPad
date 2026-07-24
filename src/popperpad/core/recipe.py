@@ -5,24 +5,24 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .result import Reject
-from .values import FrozenDict, JsonValue, freeze_json
+from .values import DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
 
 @dataclass(frozen=True, slots=True)
-class InputSpec:
+class InputSpec(DeeplyImmutable):
     kind: str  # ref|text|binding
     value: str
 
 
 @dataclass(frozen=True, slots=True)
-class ArtifactPlan:
+class ArtifactPlan(DeeplyImmutable):
     path: str
     max_bytes: int | None = None
     media_type: str = "application/octet-stream"
 
 
 @dataclass(frozen=True, slots=True)
-class Expectations:
+class Expectations(DeeplyImmutable):
     exit_code: int = 0
     stdout_contains: str | None = None
     stderr_contains: str | None = None
@@ -35,7 +35,7 @@ class Expectations:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipePlan:
+class RecipePlan(DeeplyImmutable):
     argv: tuple[str, ...]
     timeout_ms: int
     max_output_bytes: int
@@ -51,7 +51,7 @@ class RecipePlan:
 
 
 @dataclass(frozen=True, slots=True)
-class ProcessObservation:
+class ProcessObservation(DeeplyImmutable):
     exit_code: int
     stdout_text: str
     stderr_text: str
@@ -59,7 +59,7 @@ class ProcessObservation:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeEvaluation:
+class RecipeEvaluation(DeeplyImmutable):
     status: str  # PASS|FAIL
     reason: str
 
