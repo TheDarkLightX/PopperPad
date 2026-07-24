@@ -3,9 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
-from .core.values import FrozenDict, JsonValue, thaw_json
+from .core.check import (
+    AggregateVerdict,
+    CheckSummary,
+    RunIntent,
+    decide_check_summary,
+    recipe_applies,
+)
+from .core.values import thaw_json
 from .log import utc_now_iso
-from .refs import RunMode, Verdict, is_ref, require
+from .refs import is_ref, require
 from .runner import RunRecipeResult, run_recipe
 from .schemas import (
     SCHEMA_ARTIFACT_V1,
@@ -47,11 +54,8 @@ class _PadLike(Protocol):
     def cas(self) -> Any: ...
 
 
-def _recipe_matches_mode(recipe: Mapping[str, Any], mode: RunMode) -> bool:
-    verdict_on_pass = str(recipe.get("verdict_on_pass", "support"))
-    if mode is RunMode.PROVE:
-        return verdict_on_pass == "support"
-    return verdict_on_pass == "refute"
+def _recipe_matches_intent(recipe: Mapping[str, Any], intent: RunIntent) -> bool:
+    return recipe_applies(str(recipe.get("verdict_on_pass", "support")), intent)
 
 
 def _plain_outputs(result: RunRecipeResult) -> tuple[dict[str, Any], ...]:
@@ -128,22 +132,6 @@ def _counterexample_ref(pad: _PadLike, ev_ref: str, outputs: tuple[dict[str, Any
     return pad.put_object(artifact).obj_ref
 
 
-def _decide_verdict(
-    *, mode: RunMode, any_pass: bool, any_fail: bool, any_inconclusive: bool, has_evidence: bool
-) -> Verdict:
-    if not has_evidence:
-        return Verdict.INCONCLUSIVE
-    if mode is RunMode.REFUTE:
-        if any_pass:
-            return Verdict.PASS
-        return Verdict.INCONCLUSIVE if any_inconclusive else Verdict.FAIL
-    if any_fail:
-        return Verdict.FAIL
-    if any_pass:
-        return Verdict.PASS
-    return Verdict.INCONCLUSIVE
-
-
 class CheckEngine:
     """Imperative interpreter for immutable recipe and evidence decisions."""
 
@@ -151,7 +139,7 @@ class CheckEngine:
         self._pad = pad
 
     def run_hypothesis(self, hyp_ref: str, *, context_ref: str | None, mode: str) -> RunResult:
-        run_mode = RunMode(mode)
+        intent = RunIntent(mode)
         hypothesis = self._pad.get_object(hyp_ref)
         require(
             isinstance(hypothesis, Mapping) and hypothesis.get("schema") == SCHEMA_HYPOTHESIS_V1,
@@ -165,22 +153,16 @@ class CheckEngine:
 
         evidence_refs: list[str] = []
         edge_refs: list[str] = []
-        status_flags = {"pass": False, "fail": False, "inconclusive": False}
-        for recipe_ref in self._matching_recipes(recipe_refs, run_mode):
-            outcome = self._run_one_recipe(recipe_ref, run_mode, hyp_ref, context_ref)
+        categories: list[str] = []
+        for recipe_ref in self._matching_recipes(recipe_refs, intent):
+            outcome = self._run_one_recipe(recipe_ref, intent, hyp_ref, context_ref)
             evidence_refs.append(outcome.evidence_ref)
             edge_refs.extend(outcome.edge_refs)
-            status_flags[outcome.category] = True
+            categories.append(outcome.category)
 
-        verdict = _decide_verdict(
-            mode=run_mode,
-            any_pass=status_flags["pass"],
-            any_fail=status_flags["fail"],
-            any_inconclusive=status_flags["inconclusive"],
-            has_evidence=bool(evidence_refs),
-        )
+        verdict = decide_check_summary(CheckSummary(intent=intent, categories=tuple(categories)))
         return RunResult(
-            ok=verdict is Verdict.PASS,
+            ok=verdict is AggregateVerdict.PASS,
             verdict=verdict.value,
             evidence_refs=tuple(evidence_refs),
             edge_refs=tuple(edge_refs),
@@ -189,7 +171,7 @@ class CheckEngine:
     def _run_one_recipe(
         self,
         recipe: tuple[str, Mapping[str, Any]],
-        mode: RunMode,
+        intent: RunIntent,
         hyp_ref: str,
         context_ref: str | None,
     ) -> _RecipeOutcome:
@@ -201,7 +183,7 @@ class CheckEngine:
         edge_refs: tuple[str, ...] = ()
         if result.status == "PASS":
             edge_refs = self._emit_edges(
-                mode,
+                intent,
                 evidence_ref,
                 hyp_ref,
                 context_ref,
@@ -214,7 +196,7 @@ class CheckEngine:
         )
 
     def _matching_recipes(
-        self, recipe_refs: tuple[Any, ...], mode: RunMode
+        self, recipe_refs: tuple[Any, ...], intent: RunIntent
     ) -> tuple[tuple[str, Mapping[str, Any]], ...]:
         recipes: list[tuple[str, Mapping[str, Any]]] = []
         for ref in recipe_refs:
@@ -223,20 +205,20 @@ class CheckEngine:
             recipe = self._pad.get_object(str(ref))
             if not (isinstance(recipe, Mapping) and recipe.get("schema") == SCHEMA_RECIPE_V1):
                 continue
-            if not _recipe_matches_mode(recipe, mode):
+            if not _recipe_matches_intent(recipe, intent):
                 continue
             recipes.append((str(ref), recipe))
         return tuple(recipes)
 
     def _emit_edges(
         self,
-        mode: RunMode,
+        intent: RunIntent,
         evidence_ref: str,
         hyp_ref: str,
         context_ref: str | None,
         outputs: tuple[dict[str, Any], ...],
     ) -> tuple[str, ...]:
-        if mode is RunMode.PROVE:
+        if intent is RunIntent.PROVE:
             edge = _build_supports_edge(ev_ref=evidence_ref, hyp_ref=hyp_ref, context_ref=context_ref)
             return (self._pad.put_object(edge).obj_ref,)
         edge = _build_refutes_edge(
