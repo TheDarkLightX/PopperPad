@@ -1,6 +1,7 @@
 """Versioned commitments plus the byte-compatible v1 JSON surface."""
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from .core.codec import (
@@ -9,6 +10,14 @@ from .core.codec import (
     domain_sha256,
     sha256_bytes,
 )
+
+
+def _legacy_plain(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _legacy_plain(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_legacy_plain(child) for child in value]
+    return value
 
 
 def canonical_json_bytes(obj: Any) -> bytes:
@@ -20,7 +29,7 @@ def canonical_json_bytes(obj: Any) -> bytes:
     """
 
     encoded = json.dumps(
-        obj,
+        _legacy_plain(obj),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,

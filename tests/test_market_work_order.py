@@ -56,6 +56,7 @@ def test_legacy_float_scoring_value_remains_storable() -> None:
         pad.init()
         rep = pad.put_object(obj)
         assert pad.get_object(rep.obj_ref) == obj
+        assert [record["schema"] for record in pad.log.iter_raw_records()] == ["popperpad/log_record/v1"]
         pad.doctor(strict=True)
 
 
