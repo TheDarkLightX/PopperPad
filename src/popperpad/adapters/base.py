@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..refs import Ref, is_ref, require, require_str
+from ..core.values import FrozenDict, JsonValue, freeze_json, thaw_json
 
 
 class CheckStatus(str, Enum):
@@ -15,45 +15,60 @@ class CheckStatus(str, Enum):
     SKIP = "skip"
 
 
-@dataclass(frozen=True)
+def _freeze_mapping(value: Mapping[str, Any] | FrozenDict[JsonValue]) -> FrozenDict[JsonValue]:
+    if isinstance(value, FrozenDict):
+        return value
+    frozen = freeze_json(value)
+    if not isinstance(frozen, FrozenDict):
+        raise TypeError("expected object-shaped immutable value")
+    return frozen
+
+
+@dataclass(frozen=True, slots=True)
 class VerificationCheck:
     name: str
     status: str  # pass|fail|skip
     detail: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class VerificationReport:
     target_ref: str
     status: str  # pass|fail
-    checks: list[VerificationCheck]
+    checks: tuple[VerificationCheck, ...]
     verified_at: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "checks", tuple(self.checks))
 
     @property
     def ok(self) -> bool:
         return self.status == CheckStatus.PASS.value
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PreparedBundle:
     manifest_ref: str
     bundle_root: str
     object_count: int
     blob_count: int
     byte_size: int
-    canonicalization: str = "popperpad-json-c14n-v1"
+    canonicalization: str = "popperpad-json-int-v2"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StorageReceipt:
     adapter: str
     network: str
     bundle_root: str
     content_id: str
-    retrieval: Mapping[str, Any]
+    retrieval: FrozenDict[JsonValue]
     created_at: str
     publisher_ref: str = ""
     signature: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "retrieval", _freeze_mapping(self.retrieval))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -62,14 +77,14 @@ class StorageReceipt:
             "network": self.network,
             "bundle_root": self.bundle_root,
             "content_id": self.content_id,
-            "retrieval": dict(self.retrieval),
+            "retrieval": thaw_json(self.retrieval),
             "created_at": self.created_at,
             "publisher_ref": self.publisher_ref,
             "signature": self.signature,
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AnchorReceipt:
     adapter: str
     chain_id: str
@@ -81,7 +96,10 @@ class AnchorReceipt:
     event_name: str
     created_at: str
     anchor_ref: str = ""
-    finality: Mapping[str, Any] = field(default_factory=dict)
+    finality: FrozenDict[JsonValue] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "finality", _freeze_mapping(self.finality))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -95,37 +113,42 @@ class AnchorReceipt:
             "block_ref": self.block_ref,
             "contract_ref": self.contract_ref,
             "event_name": self.event_name,
-            "finality": dict(self.finality),
+            "finality": thaw_json(self.finality),
             "created_at": self.created_at,
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ImportReport:
     bundle_root: str
-    imported_object_refs: list[str]
-    imported_blob_refs: list[str]
-    skipped_refs: list[str]
+    imported_object_refs: tuple[str, ...]
+    imported_blob_refs: tuple[str, ...]
+    skipped_refs: tuple[str, ...]
     status: str  # imported|partial|rejected
-    checks: list[VerificationCheck]
+    checks: tuple[VerificationCheck, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "imported_object_refs", tuple(self.imported_object_refs))
+        object.__setattr__(self, "imported_blob_refs", tuple(self.imported_blob_refs))
+        object.__setattr__(self, "skipped_refs", tuple(self.skipped_refs))
+        object.__setattr__(self, "checks", tuple(self.checks))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TrustPolicy:
-    """Local trust policy applied when importing bundles.
-
-    Fail-closed by default: required signatures must be present and bundle roots
-    must match. ``require_signatures`` enforces that at least one signature is
-    present on the manifest.
-    """
+    """Immutable local trust policy applied when importing bundles."""
 
     require_signatures: bool = True
     require_bundle_root_match: bool = True
     accept_adapters: tuple[str, ...] = ()
     require_anchors: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "accept_adapters", tuple(self.accept_adapters))
+        object.__setattr__(self, "require_anchors", tuple(self.require_anchors))
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class AdapterCapability:
     content_addressed: bool = False
     append_only: bool = False
@@ -136,7 +159,7 @@ class AdapterCapability:
 
 
 class Adapter(ABC):
-    """Common base for storage and anchor adapters."""
+    """Common base for storage and anchor shell adapters."""
 
     adapter_id: str = ""
     kind: str = ""
