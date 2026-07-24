@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .values import Amount
+from .values import Amount, DeeplyImmutable
 
 
 @dataclass(frozen=True, slots=True)
-class TreasuryEpoch:
+class TreasuryEpoch(DeeplyImmutable):
     name: str
     starting_balance: Amount
     inflows: Amount
@@ -21,10 +21,11 @@ class TreasuryEpoch:
             committed_outflows=self.committed_outflows,
             reserve_requirement=self.reserve_requirement,
         )
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceBudget:
+class ResourceBudget(DeeplyImmutable):
     budget_id: str
     funded: Amount
     compute: Amount
@@ -43,10 +44,11 @@ class ResourceBudget:
             verifier=self.verifier,
             retrieval=self.retrieval,
         )
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class EarnPath:
+class EarnPath(DeeplyImmutable):
     name: str
     earned_credits: Amount
     minimum_agent_run_cost: Amount
@@ -57,10 +59,11 @@ class EarnPath:
             earned_credits=self.earned_credits,
             minimum_agent_run_cost=self.minimum_agent_run_cost,
         )
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class CertificateCase:
+class CertificateCase(DeeplyImmutable):
     name: str
     payment_offered: Amount
     verifier_accepted: bool
@@ -75,10 +78,11 @@ class CertificateCase:
             certificate_available=self.certificate_available,
             challenge_failed=self.challenge_failed,
         )
+        DeeplyImmutable.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class TruthBoundaryInputs:
+class TruthBoundaryInputs(DeeplyImmutable):
     stake_changed: bool = False
     verifier_result_changed: bool = False
     local_status_inputs_changed: bool = False
@@ -91,6 +95,7 @@ class TruthBoundaryInputs:
             local_status_inputs_changed=self.local_status_inputs_changed,
             status_changed=self.status_changed,
         )
+        DeeplyImmutable.__post_init__(self)
 
 
 def _require_name(field_name: str, value: object) -> None:
