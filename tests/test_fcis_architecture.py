@@ -76,6 +76,12 @@ def test_freeze_json_owns_the_complete_transitive_value() -> None:
         frozen["score"] = 1  # type: ignore[index]
 
 
+def test_frozen_dict_rejects_mutable_child_aliases() -> None:
+    payload: list[str] = []
+    with pytest.raises(TypeError, match="deeply immutable"):
+        FrozenDict({"payload": payload})
+
+
 def test_committed_values_reject_floating_point() -> None:
     with pytest.raises(TypeError, match="floating-point"):
         freeze_json({"weight": 0.25})
@@ -133,6 +139,36 @@ def test_check_aggregation_is_a_core_decision() -> None:
     assert decide_check_summary(CheckSummary(RunIntent.PROVE, ("fail",))) is AggregateVerdict.FAIL
     assert decide_check_summary(CheckSummary(RunIntent.REFUTE, ("pass",))) is AggregateVerdict.PASS
     assert decide_check_summary(CheckSummary(RunIntent.REFUTE, ("inconclusive",))) is AggregateVerdict.INCONCLUSIVE
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    (
+        ("next_state", {"next_state": [], "effects": (), "receipt": "r1"}),
+        ("effects", {"next_state": Amount(1), "effects": ([],), "receipt": "r1"}),
+        ("receipt", {"next_state": Amount(1), "effects": (), "receipt": {}}),
+    ),
+)
+def test_accept_rejects_mutable_authority_payloads(field: str, kwargs: dict[str, object]) -> None:
+    with pytest.raises(TypeError, match=field):
+        Accept(**kwargs)
+
+
+def test_reject_owns_nested_json_details() -> None:
+    source = {"reasons": ["missing"]}
+    reject = Reject("INVALID", details=source)  # type: ignore[arg-type]
+    source["reasons"].append("mutated")
+    assert thaw_json(reject.details) == {"reasons": ["missing"]}
+
+
+def test_committed_failure_rejects_mutable_authority_payloads() -> None:
+    with pytest.raises(TypeError, match="next_state"):
+        CommittedFailure(
+            code="FAILED",
+            next_state=[],
+            effects=(),
+            receipt="r1",
+        )
 
 
 def test_all_core_dataclasses_are_frozen_slotted_and_have_no_mutable_fields() -> None:

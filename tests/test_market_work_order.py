@@ -46,6 +46,19 @@ def test_market_work_order_validates_and_can_be_stored() -> None:
         pad.doctor(strict=True)
 
 
+def test_legacy_float_scoring_value_remains_storable() -> None:
+    from popperpad.pad import PopperPad
+
+    obj = _work_order()
+    obj["scoring"] = {"novelty_weight": 0.30}
+    with tempfile.TemporaryDirectory() as td:
+        pad = PopperPad(root=Path(td) / "pad")
+        pad.init()
+        rep = pad.put_object(obj)
+        assert pad.get_object(rep.obj_ref) == obj
+        pad.doctor(strict=True)
+
+
 def test_market_work_order_rejects_unknown_task_type() -> None:
     from popperpad.validate import validate_object
 
