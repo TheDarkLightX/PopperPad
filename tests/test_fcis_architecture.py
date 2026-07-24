@@ -19,6 +19,7 @@ CORE_MODULES = (
     "popperpad.core.codec",
     "popperpad.core.commit",
     "popperpad.core.evidence",
+    "popperpad.core.graph",
     "popperpad.core.mechanism",
     "popperpad.core.recipe",
     "popperpad.core.result",
@@ -175,3 +176,11 @@ def test_check_engine_does_not_reconstruct_or_individually_publish_semantic_obje
     assert ".put_object(" not in source
     assert "plan_check_objects(" in source
     assert ".commit_values(" in source
+
+
+def test_core_graph_functions_accept_snapshots_not_lookup_callbacks() -> None:
+    graph_core = importlib.import_module("popperpad.core.graph")
+    status_parameters = inspect.signature(graph_core.derive_status).parameters
+    transfer_parameters = inspect.signature(graph_core.find_transfer_paths).parameters
+    assert tuple(status_parameters) == ("snapshot",)
+    assert "evidence_lookup" not in transfer_parameters
