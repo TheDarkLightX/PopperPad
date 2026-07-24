@@ -9,7 +9,7 @@ from popperpad.adapters import Bundle, TrustPolicy
 from popperpad.adapters.bundle import export_bundle
 from popperpad.adapters.flow import import_bundle
 from popperpad.canonical import canonical_json_bytes, sha256_bytes
-from popperpad.core.commit import CommitBundle, plan_commit
+from popperpad.core.commit import BlobWrite, CommitBundle, ObjectWrite, plan_commit
 from popperpad.core.result import Reject
 from popperpad.core.values import FrozenDict
 from popperpad.log import AppendOnlyLog
@@ -87,6 +87,21 @@ def test_python_planner_rejects_rust_parity_boundaries(
     planned = plan_commit(**kwargs)  # type: ignore[arg-type]
     assert isinstance(planned, Reject)
     assert planned.code == expected_code
+
+
+def test_commit_value_constructors_reject_wrong_immutable_runtime_types() -> None:
+    with pytest.raises(TypeError, match="payload"):
+        ObjectWrite(
+            ref="sha256:" + "a" * 64,
+            schema="example/v1",
+            payload=bytearray(b"mutable"),  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError, match="media_type"):
+        BlobWrite(
+            ref="sha256:" + "b" * 64,
+            media_type=7,  # type: ignore[arg-type]
+            payload=b"owned",
+        )
 
 
 def test_batch_commit_has_one_physical_record_and_legacy_logical_projection(tmp_path: Path) -> None:
