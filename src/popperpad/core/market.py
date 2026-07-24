@@ -920,12 +920,27 @@ def _validate_market_state(value: object) -> str | None:
     }
     if len(submissions_by_id) != len(state.submissions):
         return "submission ids must be unique"
+    challenge_ids = {challenge.challenge_id for challenge in state.challenges}
+    if len(challenge_ids) != len(state.challenges):
+        return "challenge ids must be unique"
+    if any(
+        challenge.submission_id not in submissions_by_id
+        for challenge in state.challenges
+    ):
+        return "challenges must reference existing submissions"
     for submission_id in state.payable_submission_ids:
         submission = submissions_by_id.get(submission_id)
         if submission is None:
             return "payable_submission_ids must reference existing submissions"
         if submission.status is not SubmissionStatus.VERIFIED:
             return "payable_submission_ids must reference verified submissions"
+    if state.phase is BountyPhase.PAYABLE and not state.payable_submission_ids:
+        return "payable state must contain a verified submission"
+    if state.payable_submission_ids and state.phase not in (
+        BountyPhase.PAYABLE,
+        BountyPhase.SETTLED,
+    ):
+        return "payable submissions are inconsistent with the bounty phase"
     if state.settlement_ref is not None and (
         not isinstance(state.settlement_ref, str) or not state.settlement_ref
     ):

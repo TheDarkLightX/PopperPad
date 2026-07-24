@@ -596,3 +596,84 @@ def test_payable_state_rejects_unverified_submission_ids() -> None:
     assert isinstance(decision, Reject)
     assert decision.code == "INVALID_STATE"
     assert "verified submissions" in decision.details["reason"]
+
+
+def test_market_state_rejects_duplicate_and_dangling_challenges() -> None:
+    challenged = apply_market_command(
+        verified_state(),
+        OpenChallenge(
+            "cmd-challenge-invalid-state",
+            "challenge-invalid-state",
+            "submission-1",
+            "did:example:challenger",
+            "invalid_signature",
+            (R("2"),),
+            Amount(50),
+            800,
+        ),
+        policy(),
+    )
+    assert isinstance(challenged, Accept)
+    challenge = challenged.next_state.challenges[0]
+
+    duplicate = replace(
+        challenged.next_state,
+        challenges=(challenge, challenge),
+    )
+    duplicate_decision = apply_market_command(
+        duplicate,
+        AdvanceBounty("cmd-duplicate-challenge-state", 1_201),
+        policy(),
+    )
+    assert isinstance(duplicate_decision, Reject)
+    assert duplicate_decision.code == "INVALID_STATE"
+    assert "challenge ids must be unique" in duplicate_decision.details["reason"]
+
+    dangling = replace(
+        challenged.next_state,
+        challenges=(replace(challenge, submission_id="missing-submission"),),
+    )
+    dangling_decision = apply_market_command(
+        dangling,
+        AdvanceBounty("cmd-dangling-challenge-state", 1_201),
+        policy(),
+    )
+    assert isinstance(dangling_decision, Reject)
+    assert dangling_decision.code == "INVALID_STATE"
+    assert "existing submissions" in dangling_decision.details["reason"]
+
+
+def test_market_state_rejects_payable_ids_outside_payable_lifecycle() -> None:
+    malformed_open = replace(
+        verified_state(),
+        payable_submission_ids=("submission-1",),
+    )
+    open_decision = apply_market_command(
+        malformed_open,
+        AdvanceBounty("cmd-payable-id-in-open-state", 1_101),
+        policy(),
+    )
+    assert isinstance(open_decision, Reject)
+    assert open_decision.code == "INVALID_STATE"
+    assert "inconsistent with the bounty phase" in open_decision.details["reason"]
+
+    payable = apply_market_command(
+        verified_state(),
+        AdvanceBounty("cmd-valid-payable-state", 1_101),
+        policy(),
+    )
+    assert isinstance(payable, Accept)
+    malformed_payable = replace(payable.next_state, payable_submission_ids=())
+    payable_decision = apply_market_command(
+        malformed_payable,
+        SettleBounty(
+            "cmd-empty-payable-state",
+            "chain:tx:empty-payable",
+            (Payout("did:example:refuter", "submission-1", Amount(1_000)),),
+            1_102,
+        ),
+        policy(),
+    )
+    assert isinstance(payable_decision, Reject)
+    assert payable_decision.code == "INVALID_STATE"
+    assert "must contain a verified submission" in payable_decision.details["reason"]
