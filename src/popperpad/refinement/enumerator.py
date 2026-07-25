@@ -35,6 +35,7 @@ from ..core.adapter_protocol import (
 )
 from ..core.codec import canonical_hash
 from ..core.values import FrozenDict, JsonValue, freeze_json
+from ..core.values import DeeplyImmutable
 from .finite_state import (
     AbstractCommandKind,
     COMMAND_SLOTS,
@@ -49,8 +50,8 @@ from .market_adapter import apply_data_adapter, abstract_state_hash
 CORPUS_DOMAIN = "popperpad-enumeration-corpus/v1"
 
 
-@dataclass(frozen=True)
-class EnumerationResult:
+@dataclass(frozen=True, slots=True)
+class EnumerationResult(DeeplyImmutable):
     reachable_states: int
     command_variants: int
     time_classes: int
@@ -58,11 +59,16 @@ class EnumerationResult:
     enabled_transitions: int
     accept_count: int
     reject_count: int
-    reject_reasons: dict[str, int]
+    reject_reasons: FrozenDict[JsonValue]
     committed_failure_count: int
     corpus_hash: str
     search_complete: bool
     budget_exhausted: bool
+
+    def __post_init__(self) -> None:
+        if type(self.reject_reasons) is not FrozenDict:
+            raise TypeError("EnumerationResult.reject_reasons must be a FrozenDict")
+        DeeplyImmutable.__post_init__(self)
 
 
 def enumerate_all_transitions(
@@ -164,6 +170,8 @@ def enumerate_all_transitions(
 
     corpus_hash = canonical_hash(CORPUS_DOMAIN, tuple(corpus_entries))
 
+    frozen_reject_reasons = freeze_json(reject_reasons)
+    assert isinstance(frozen_reject_reasons, FrozenDict)
     return EnumerationResult(
         reachable_states=len(visited),
         command_variants=len(command_variants),
@@ -172,7 +180,7 @@ def enumerate_all_transitions(
         enabled_transitions=enabled_transitions,
         accept_count=accept_count,
         reject_count=reject_count,
-        reject_reasons=reject_reasons,
+        reject_reasons=frozen_reject_reasons,
         committed_failure_count=committed_failure_count,
         corpus_hash=corpus_hash,
         search_complete=not budget_exhausted,

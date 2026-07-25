@@ -33,11 +33,12 @@ from ...core.adapter_protocol import (
     SourceFileBinding,
     SourceManifest,
 )
+from ...core.codec import sha256_bytes
 from ...core.values import FrozenDict, freeze_json
 
 
 _PROFILE_JSON_PATH = Path(__file__).parent / "market_single_slot_v1.json"
-_SOURCE_MANIFEST_PATH = Path(__file__).resolve().parents[4] / "formal" / "manifests" / "market_single_slot_v1.sources.json"
+_SOURCE_MANIFEST_PATH = Path(__file__).parent / "market_single_slot_v1.sources.json"
 
 
 def load_profile() -> DataAdapterProfile:
@@ -91,7 +92,47 @@ def load_source_manifest(profile: DataAdapterProfile | None = None) -> SourceMan
             f"source manifest profile_hash {manifest.profile_hash} "
             f"does not match loaded profile hash {profile.hash()}"
         )
+    verify_source_manifest_files(manifest)
     return manifest
+
+
+def verify_source_manifest_files(
+    manifest: SourceManifest,
+    *,
+    source_roots: tuple[Path, ...] | None = None,
+) -> None:
+    """Verify every manifest digest against the live loaded source bytes.
+
+    A source checkout resolves paths from the repository root. An installed
+    wheel resolves ``src/`` paths from the site-packages root. Callers may
+    provide explicit roots for deterministic tests.
+    """
+
+    if source_roots is None:
+        source_roots = (
+            Path(__file__).resolve().parents[4],
+            Path(__file__).resolve().parents[3],
+        )
+    if type(source_roots) is not tuple or not source_roots:
+        raise ValueError("source_roots must be a non-empty tuple")
+
+    for binding in manifest.files:
+        relative = Path(binding.path)
+        installed_relative = Path(*relative.parts[1:]) if relative.parts[:1] == ("src",) else relative
+        candidates: list[Path] = []
+        for root in source_roots:
+            candidates.append(root / relative)
+            if installed_relative != relative:
+                candidates.append(root / installed_relative)
+        live_path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if live_path is None:
+            raise ValueError(f"manifest source file is missing: {binding.path}")
+        actual = sha256_bytes(live_path.read_bytes())
+        if actual != binding.sha256:
+            raise ValueError(
+                f"source digest mismatch for {binding.path}: "
+                f"expected {binding.sha256}, got {actual}"
+            )
 
 
 def load_binding(
@@ -116,6 +157,7 @@ def load_binding(
             f"source manifest profile_hash {manifest.profile_hash} "
             f"does not match loaded profile hash {profile.hash()}"
         )
+    verify_source_manifest_files(manifest)
     binding = AdapterBinding(
         schema=BINDING_SCHEMA,
         profile_hash=profile.hash(),

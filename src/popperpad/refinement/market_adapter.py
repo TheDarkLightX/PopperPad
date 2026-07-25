@@ -437,7 +437,24 @@ def apply_data_adapter(
     return INVALID_INPUT. Programming defects raise and terminate.
     """
 
-    market = parse_market_profile(profile.semantic_profile)
+    actual_profile_hash = profile.hash()
+    if binding.profile_hash != actual_profile_hash:
+        return _invalid_input(
+            request,
+            InvalidInputCode.PROFILE_MISMATCH,
+            "$.binding_hash",
+            f"binding profile_hash {binding.profile_hash} does not match loaded profile {actual_profile_hash}",
+        )
+
+    try:
+        market = parse_market_profile(profile.semantic_profile)
+    except (ValueError, TypeError, KeyError) as exc:
+        return _invalid_input(
+            request,
+            InvalidInputCode.PROFILE_MISMATCH,
+            "$.profile",
+            f"bound semantic profile is invalid: {exc}",
+        )
 
     # 1. Validate binding_hash matches
     if request.binding_hash != binding.hash():

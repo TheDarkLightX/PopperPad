@@ -20,19 +20,26 @@ Tests verify:
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from popperpad.core.adapter_protocol import (
     ADAPTER_PROTOCOL_VERSION,
+    BINDING_SCHEMA,
     REQUEST_SCHEMA,
+    AdapterBinding,
     AdapterDecisionKind,
     AdapterOperation,
     AdapterRequest,
     ExecutionContext,
     InvalidInputCode,
+    SOURCE_MANIFEST_SCHEMA,
+    SourceFileBinding,
+    SourceManifest,
 )
+from popperpad.core.codec import sha256_bytes
 from popperpad.core.market_invariants import market_state_violations, MarketStateViolationCode
 from popperpad.core.values import FrozenDict, freeze_json
 from popperpad.refinement.finite_state import (
@@ -59,6 +66,7 @@ from popperpad.refinement.profiles.market_single_slot_v1 import (
     load_profile,
     load_binding,
     load_source_manifest,
+    verify_source_manifest_files,
 )
 
 
@@ -552,6 +560,45 @@ def test_binding_hash_mismatch_returns_invalid_input(binding) -> None:
     assert resp.reason_code == InvalidInputCode.BINDING_MISMATCH.value
 
 
+def test_profile_hash_mismatch_returns_invalid_input(profile, binding) -> None:
+    mismatched_profile = replace(profile, profile_id="different-profile")
+    initial = initial_abstract_state()
+    req = _make_request(
+        binding,
+        initial.as_json(),
+        None,
+        operation=AdapterOperation.VALIDATE_STATE,
+    )
+    resp = apply_data_adapter(mismatched_profile, binding, req)
+    assert resp.decision_kind is AdapterDecisionKind.INVALID_INPUT
+    assert resp.reason_code == InvalidInputCode.PROFILE_MISMATCH.value
+
+
+def test_malformed_bound_profile_returns_invalid_input(profile) -> None:
+    malformed_profile = replace(
+        profile,
+        semantic_profile=freeze_json({"wrong": "shape"}),
+    )
+    binding = AdapterBinding(
+        schema=BINDING_SCHEMA,
+        profile_hash=malformed_profile.hash(),
+        source_manifest_hash="sha256:" + "a" * 64,
+        model_ir_hash=None,
+        protocol_version=ADAPTER_PROTOCOL_VERSION,
+        adapter_implementation_id="test",
+    )
+    initial = initial_abstract_state()
+    req = _make_request(
+        binding,
+        initial.as_json(),
+        None,
+        operation=AdapterOperation.VALIDATE_STATE,
+    )
+    resp = apply_data_adapter(malformed_profile, binding, req)
+    assert resp.decision_kind is AdapterDecisionKind.INVALID_INPUT
+    assert resp.reason_code == InvalidInputCode.PROFILE_MISMATCH.value
+
+
 # ---------------------------------------------------------------------------
 # Time class enforcement.
 # ---------------------------------------------------------------------------
@@ -835,6 +882,40 @@ def test_load_binding_fails_on_stale_manifest(profile) -> None:
         load_binding(profile, stale_manifest)
 
 
+def test_source_manifest_verifies_live_bytes_and_rejects_tamper(
+    tmp_path: Path,
+    profile,
+) -> None:
+    source = tmp_path / "src" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"trusted source\n")
+    manifest = SourceManifest(
+        schema=SOURCE_MANIFEST_SCHEMA,
+        repository="test/repository",
+        commit="a" * 40,
+        files=(
+            SourceFileBinding(
+                path="src/example.py",
+                sha256=sha256_bytes(b"trusted source\n"),
+            ),
+        ),
+        profile_hash=profile.hash(),
+        codec_version="popperpad-json-int-v2",
+    )
+    verify_source_manifest_files(manifest, source_roots=(tmp_path,))
+    source.write_bytes(b"tampered source\n")
+    with pytest.raises(ValueError, match="source digest mismatch"):
+        verify_source_manifest_files(manifest, source_roots=(tmp_path,))
+
+
+def test_profile_and_source_manifest_are_packaged_resources() -> None:
+    import popperpad.refinement.profiles.market_single_slot_v1 as profile_module
+
+    resource_dir = Path(profile_module.__file__).parent
+    assert (resource_dir / "market_single_slot_v1.json").is_file()
+    assert (resource_dir / "market_single_slot_v1.sources.json").is_file()
+
+
 # ---------------------------------------------------------------------------
 # Complete BFS enumeration.
 # ---------------------------------------------------------------------------
@@ -849,6 +930,9 @@ def test_complete_enumeration_search_completes(profile, binding) -> None:
     assert result.total_cases > 0
     assert result.accept_count > 0
     assert result.reject_count > 0
+    assert type(result.reject_reasons) is FrozenDict
+    with pytest.raises(TypeError):
+        result.reject_reasons["mutated"] = 1
 
 
 def test_enumeration_corpus_hash_is_deterministic(profile, binding) -> None:

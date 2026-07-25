@@ -149,6 +149,36 @@ class TimeClassOrNone(ClosedStrEnum):
 # Command slots — each transition uses a fixed command ID from the profile.
 COMMAND_SLOTS: tuple[AbstractCommandKind, ...] = tuple(AbstractCommandKind)
 
+_STATE_FIELDS = frozenset(
+    {
+        "phase",
+        "escrow_atoms",
+        "submission_status",
+        "submission_time_class",
+        "bond_atoms",
+        "challenge_status",
+        "challenge_opened_time_class",
+        "deposit_atoms",
+        "payable",
+        "settled",
+        "processed_command_mask",
+    }
+)
+
+
+def _require_exact_fields(
+    data: FrozenDict[JsonValue],
+    expected: frozenset[str],
+    field_path: str,
+) -> None:
+    actual = frozenset(data)
+    unknown = sorted(actual - expected)
+    if unknown:
+        raise ValueError(f"{field_path} contains unknown fields: {unknown}")
+    missing = sorted(expected - actual)
+    if missing:
+        raise ValueError(f"{field_path} is missing required fields: {missing}")
+
 
 @dataclass(frozen=True, slots=True)
 class SingleSlotAbstractState(DeeplyImmutable):
@@ -248,6 +278,7 @@ class SingleSlotAbstractState(DeeplyImmutable):
 
     @classmethod
     def from_json(cls, data: FrozenDict[JsonValue]) -> "SingleSlotAbstractState":
+        _require_exact_fields(data, _STATE_FIELDS, "state")
         return cls(
             phase=AbstractPhase(data["phase"]),
             escrow_atoms=data["escrow_atoms"],
@@ -362,6 +393,12 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
     @classmethod
     def from_json(cls, data: FrozenDict[JsonValue]) -> "SingleSlotAbstractCommand":
         kind = AbstractCommandKind(data["kind"])
+        expected = {"kind"}
+        if kind is AbstractCommandKind.VERIFY_SUBMISSION:
+            expected.add("accepted")
+        elif kind is AbstractCommandKind.RESOLVE_CHALLENGE:
+            expected.add("upheld")
+        _require_exact_fields(data, frozenset(expected), "command")
         accepted = data.get("accepted")
         upheld = data.get("upheld")
         return cls(kind=kind, accepted=accepted, upheld=upheld)

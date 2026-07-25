@@ -18,6 +18,7 @@ import json
 import pytest
 
 from popperpad.shells.data_adapter_jsonl import (
+    MAX_REQUEST_BYTES,
     StrictJSONParseError,
     parse_canonical_json,
     process_line,
@@ -59,7 +60,6 @@ def _canonical_request_dict(**overrides) -> dict:
             "challenge_status": "none",
             "deposit_atoms": 0,
             "escrow_atoms": 0,
-            "paid": False,
             "payable": False,
             "phase": "draft",
             "processed_command_mask": 0,
@@ -96,8 +96,9 @@ def test_parse_rejects_trailing_content() -> None:
 
 
 def test_parse_rejects_non_utf8() -> None:
-    with pytest.raises(StrictJSONParseError, match="utf"):
+    with pytest.raises(StrictJSONParseError, match="utf") as exc_info:
         parse_canonical_json(b'{"a":1}\xff\xfe')
+    assert exc_info.value.code.value == "invalid_utf8"
 
 
 def test_parse_rejects_empty_input() -> None:
@@ -122,6 +123,13 @@ def test_parse_rejects_non_canonical_key_order() -> None:
         parse_canonical_json(b'{"b":2,"a":1}')
 
 
+@pytest.mark.parametrize("value", [b'{"a":1.5}', b'{"a":NaN}', b'{"a":Infinity}'])
+def test_parse_rejects_float_and_non_finite_json_with_typed_error(value: bytes) -> None:
+    with pytest.raises(StrictJSONParseError) as exc_info:
+        parse_canonical_json(value)
+    assert exc_info.value.code.value == "float_not_allowed"
+
+
 def test_parse_accepts_canonical_json() -> None:
     # Keys must be sorted, no whitespace, no trailing newline (that's the line delimiter)
     result = parse_canonical_json(b'{"a":1,"b":[1,2,3]}')
@@ -143,7 +151,7 @@ def test_duplicate_keys_returns_invalid_input(profile, binding) -> None:
     resp = process_line(b'{"a":1,"a":2}', profile, binding)
     parsed = json.loads(resp)
     assert parsed["decision_kind"] == "invalid_input"
-    assert parsed["reason_code"] == "non_canonical_json"
+    assert parsed["reason_code"] == "duplicate_json_key"
 
 
 def test_non_canonical_bytes_returns_invalid_input(profile, binding) -> None:
@@ -151,6 +159,20 @@ def test_non_canonical_bytes_returns_invalid_input(profile, binding) -> None:
     parsed = json.loads(resp)
     assert parsed["decision_kind"] == "invalid_input"
     assert parsed["reason_code"] == "non_canonical_json"
+
+
+def test_non_utf8_returns_distinct_invalid_input_code(profile, binding) -> None:
+    raw = b'{"a":1}\xff'
+    parsed = json.loads(process_line(raw, profile, binding))
+    assert parsed["reason_code"] == "invalid_utf8"
+    assert parsed["reason_details"]["input_bytes_hash"].startswith("sha256:")
+
+
+def test_float_returns_distinct_invalid_input_code(profile, binding) -> None:
+    raw = b'{"a":1.5}'
+    parsed = json.loads(process_line(raw, profile, binding))
+    assert parsed["reason_code"] == "float_not_allowed"
+    assert parsed["reason_details"]["input_bytes_hash"].startswith("sha256:")
 
 
 def test_non_object_request_returns_invalid_input(profile, binding) -> None:
@@ -176,6 +198,7 @@ def test_wrong_schema_returns_invalid_input(profile, binding) -> None:
     resp = process_line(_canonical_bytes(d), profile, binding)
     parsed = json.loads(resp)
     assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "schema_mismatch"
 
 
 def test_wrong_protocol_version_returns_invalid_input(profile, binding) -> None:
@@ -183,6 +206,7 @@ def test_wrong_protocol_version_returns_invalid_input(profile, binding) -> None:
     resp = process_line(_canonical_bytes(d), profile, binding)
     parsed = json.loads(resp)
     assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "schema_mismatch"
 
 
 def test_wrong_binding_hash_returns_invalid_input(profile, binding) -> None:
@@ -192,6 +216,50 @@ def test_wrong_binding_hash_returns_invalid_input(profile, binding) -> None:
     parsed = json.loads(resp)
     assert parsed["decision_kind"] == "invalid_input"
     assert parsed["reason_code"] == "binding_mismatch"
+
+
+def test_unknown_top_level_field_is_rejected_without_normalization(profile, binding) -> None:
+    d = _canonical_request_dict(binding_hash=binding.hash(), extra="must-not-disappear")
+    parsed = json.loads(process_line(_canonical_bytes(d), profile, binding))
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "unknown_field"
+
+
+def test_unknown_execution_context_field_is_rejected(profile, binding) -> None:
+    d = _canonical_request_dict(binding_hash=binding.hash())
+    d["execution_context"]["clock_source"] = "host"
+    parsed = json.loads(process_line(_canonical_bytes(d), profile, binding))
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "unknown_field"
+
+
+def test_unknown_state_field_is_rejected(profile, binding) -> None:
+    d = _canonical_request_dict(binding_hash=binding.hash())
+    d["state"]["paid"] = False
+    parsed = json.loads(process_line(_canonical_bytes(d), profile, binding))
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "abstract_state_out_of_domain"
+
+
+def test_unknown_command_field_is_rejected(profile, binding) -> None:
+    initial = initial_abstract_state()
+    d = _canonical_request_dict(
+        binding_hash=binding.hash(),
+        operation="step",
+        command={"kind": "open_bounty", "accepted": None},
+        expected_pre_state_hash=abstract_state_hash(initial),
+    )
+    parsed = json.loads(process_line(_canonical_bytes(d), profile, binding))
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "abstract_command_out_of_domain"
+
+
+def test_oversized_request_is_rejected_and_bound_to_input_hash(profile, binding) -> None:
+    raw = b"x" * (MAX_REQUEST_BYTES + 1)
+    parsed = json.loads(process_line(raw, profile, binding))
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "input_too_large"
+    assert parsed["reason_details"]["input_bytes_hash"].startswith("sha256:")
 
 
 # ---------------------------------------------------------------------------
@@ -237,3 +305,17 @@ def test_run_jsonl_shell_processes_multiple_lines(profile, binding) -> None:
     assert len(responses) == 2
     assert responses[0]["decision_kind"] == "accept"
     assert responses[1]["decision_kind"] == "invalid_input"
+
+
+def test_run_jsonl_shell_drains_oversized_line_and_recovers(profile, binding) -> None:
+    valid = _canonical_bytes(_canonical_request_dict(binding_hash=binding.hash()))
+    oversized = b"x" * (MAX_REQUEST_BYTES + 100)
+    stdin = io.BytesIO(oversized + b"\n" + valid + b"\n")
+    stdout = io.BytesIO()
+    run_jsonl_shell(stdin, stdout)
+    responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [response["reason_code"] for response in responses] == [
+        "input_too_large",
+        None,
+    ]
+    assert responses[1]["decision_kind"] == "accept"
