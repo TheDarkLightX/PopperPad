@@ -1,7 +1,7 @@
 {
   "schema": "popperpad/data-adapter-source-manifest/v1",
   "repository": "TheDarkLightX/PopperPad",
-  "commit": "d9db9946d2040e452b50ec44db28ceb516c7756f",
+  "commit": "a1b4c83b10a575b28f22e431a45100c4a382347e",
   "files": [
     {
       "path": "src/popperpad/core/adapter_protocol.py",
@@ -29,15 +29,15 @@
     },
     {
       "path": "src/popperpad/refinement/enumerator.py",
-      "sha256": "sha256:f037c26efcb215771697816934f3397912d93f8abfc3103383edc75e2b1b86a8"
+      "sha256": "sha256:dab8df1a69d13639bd5c12d307b573e80fda2b399fa2e7765754ab12696b1469"
     },
     {
       "path": "src/popperpad/refinement/finite_state.py",
-      "sha256": "sha256:16b2f210cbf52ccea1e6cf78a33a62bc5e46c7ac0cecd053d1d3c60571ace8dc"
+      "sha256": "sha256:2dae7e2e80630289e0e910609ff53b0eb4ee32bfa857a9769abea25dd50c587a"
     },
     {
       "path": "src/popperpad/refinement/market_adapter.py",
-      "sha256": "sha256:cd54aa70fbcaf4b96a37ded254ebacf631f472f01c15a3e890ac17b3dad78aa1"
+      "sha256": "sha256:9abebad04922b2db3b184dd115fea658b600804a5386b0d2b4de186458b9d782"
     },
     {
       "path": "src/popperpad/refinement/profiles/market_single_slot_v1.json",
@@ -45,11 +45,11 @@
     },
     {
       "path": "src/popperpad/refinement/profiles/market_single_slot_v1.py",
-      "sha256": "sha256:3845704b8b6062ce8a55af4929915124d63233158e33f26ae2acfbd8dcbf2f86"
+      "sha256": "sha256:cf00be1b65648331eeda2c04452200bcae78e17bebd1c55aedffdf37cef44033"
     },
     {
       "path": "src/popperpad/shells/data_adapter_jsonl.py",
-      "sha256": "sha256:ea875191fa5a445e2e9966ae23454e1420bf5f3f8ac4e6a13b4f7b2fb1bf30a6"
+      "sha256": "sha256:35493a974ec0b7f48725d54e13dae8ffc27e99488b637033bce5c9076cd7ab70"
     }
   ],
   "profile_hash": "sha256:6765ad5c609d7bf20a1171666ce6e42afa82afe295206e868c757b0113df9bf1",
