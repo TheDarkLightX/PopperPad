@@ -56,7 +56,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import ClassVar, TypeAlias
 
-from .codec import canonical_hash
+from .codec import CANONICAL_JSON_VERSION, canonical_hash
 from .values import (
     Amount,
     ClosedStrEnum,
@@ -75,6 +75,7 @@ PROFILE_SCHEMA = "popperpad/data-adapter-profile/v1"
 BINDING_SCHEMA = "popperpad/data-adapter-binding/v1"
 REQUEST_SCHEMA = "popperpad/data-adapter-request/v1"
 RESPONSE_SCHEMA = "popperpad/data-adapter-response/v1"
+BOUNDARY_RESPONSE_SCHEMA = "popperpad/data-adapter-boundary-response/v1"
 SOURCE_MANIFEST_SCHEMA = "popperpad/data-adapter-source-manifest/v1"
 ADAPTER_PROTOCOL_VERSION = "v1"
 
@@ -87,6 +88,7 @@ PROFILE_HASH_DOMAIN = "popperpad-data-adapter-profile/v1"
 BINDING_HASH_DOMAIN = "popperpad-data-adapter-binding/v1"
 REQUEST_HASH_DOMAIN = "popperpad-data-adapter-request/v1"
 RESPONSE_HASH_DOMAIN = "popperpad-data-adapter-response/v1"
+BOUNDARY_RESPONSE_HASH_DOMAIN = "popperpad-data-adapter-boundary-response/v1"
 SOURCE_MANIFEST_HASH_DOMAIN = "popperpad-data-adapter-source-manifest/v1"
 
 
@@ -285,7 +287,8 @@ class SourceManifest(DeeplyImmutable):
         if paths != sorted(paths):
             raise ValueError("SourceManifest.files must be sorted by path")
         require_sha256_ref(self.profile_hash, "SourceManifest.profile_hash")
-        _require_nonempty_str(self.codec_version, "SourceManifest.codec_version")
+        if self.codec_version != CANONICAL_JSON_VERSION:
+            raise ValueError("SourceManifest.codec_version mismatch")
         DeeplyImmutable.__post_init__(self)
 
     def hash(self) -> str:
@@ -352,11 +355,12 @@ class DataAdapterProfile(DeeplyImmutable):
             ("profile_version", self.profile_version),
             ("protocol_version", self.protocol_version),
             ("abstraction_id", self.abstraction_id),
-            ("codec_version", self.codec_version),
         ):
             _require_nonempty_str(value, f"DataAdapterProfile.{name}")
         if self.protocol_version != ADAPTER_PROTOCOL_VERSION:
             raise ValueError("DataAdapterProfile.protocol_version mismatch")
+        if self.codec_version != CANONICAL_JSON_VERSION:
+            raise ValueError("DataAdapterProfile.codec_version mismatch")
 
     def _validate_payload(self) -> None:
         if type(self.semantic_profile) is not FrozenDict:
@@ -523,6 +527,8 @@ class AdapterRequest(DeeplyImmutable):
             raise TypeError("AdapterRequest.execution_context must be an ExecutionContext")
         if self.operation is AdapterOperation.STEP and self.command is None:
             raise ValueError("STEP operation requires a non-null command")
+        if self.operation is AdapterOperation.VALIDATE_STATE and self.command is not None:
+            raise ValueError("VALIDATE_STATE operation requires a null command")
 
     def hash(self) -> str:
         return canonical_hash(REQUEST_HASH_DOMAIN, self.as_json())
@@ -772,6 +778,91 @@ class AdapterResponse(DeeplyImmutable):
 
 
 # ---------------------------------------------------------------------------
+# Boundary response — committed failure data for bytes that cannot produce a
+# valid AdapterRequest. It deliberately has no request identity or request
+# hash: fabricating either would claim a request existed when decoding failed.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryFailureResponse(DeeplyImmutable):
+    schema: str
+    protocol_version: str
+    binding_hash: str
+    input_bytes_hash: str
+    decision_kind: AdapterDecisionKind
+    reason_code: str
+    reason_details: FrozenDict[JsonValue]
+    response_commitment: str
+
+    def __post_init__(self) -> None:
+        if self.schema != BOUNDARY_RESPONSE_SCHEMA:
+            raise ValueError("BoundaryFailureResponse.schema mismatch")
+        if self.protocol_version != ADAPTER_PROTOCOL_VERSION:
+            raise ValueError("BoundaryFailureResponse.protocol_version mismatch")
+        require_sha256_ref(self.binding_hash, "BoundaryFailureResponse.binding_hash")
+        require_sha256_ref(self.input_bytes_hash, "BoundaryFailureResponse.input_bytes_hash")
+        require_sha256_ref(
+            self.response_commitment,
+            "BoundaryFailureResponse.response_commitment",
+        )
+        if self.decision_kind is not AdapterDecisionKind.INVALID_INPUT:
+            raise ValueError("BoundaryFailureResponse.decision_kind must be INVALID_INPUT")
+        try:
+            code = InvalidInputCode(self.reason_code)
+        except ValueError as exc:
+            raise ValueError(
+                "BoundaryFailureResponse.reason_code must be a closed InvalidInputCode"
+            ) from exc
+        if type(self.reason_details) is not FrozenDict:
+            raise TypeError("BoundaryFailureResponse.reason_details must be a FrozenDict")
+        if frozenset(self.reason_details) != frozenset({"code", "field_path", "detail"}):
+            raise ValueError("BoundaryFailureResponse.reason_details fields mismatch")
+        if self.reason_details.get("code") != code.value:
+            raise ValueError(
+                "BoundaryFailureResponse.reason_details.code must match reason_code"
+            )
+        _require_nonempty_str(
+            self.reason_details.get("field_path"),
+            "BoundaryFailureResponse.reason_details.field_path",
+        )
+        if type(self.reason_details.get("detail")) is not str:
+            raise TypeError("BoundaryFailureResponse.reason_details.detail must be a string")
+        expected = canonical_hash(BOUNDARY_RESPONSE_HASH_DOMAIN, self._body_json())
+        if self.response_commitment != expected:
+            raise ValueError(
+                "boundary response_commitment does not match recomputed hash; "
+                "use build_boundary_failure_response"
+            )
+        DeeplyImmutable.__post_init__(self)
+
+    def _body_json(self) -> FrozenDict[JsonValue]:
+        value = freeze_json(
+            {
+                "schema": self.schema,
+                "protocol_version": self.protocol_version,
+                "binding_hash": self.binding_hash,
+                "input_bytes_hash": self.input_bytes_hash,
+                "decision_kind": self.decision_kind.value,
+                "reason_code": self.reason_code,
+                "reason_details": self.reason_details,
+            }
+        )
+        assert isinstance(value, FrozenDict)
+        return value
+
+    def as_json(self) -> FrozenDict[JsonValue]:
+        value = freeze_json(
+            {
+                **self._body_json(),
+                "response_commitment": self.response_commitment,
+            }
+        )
+        assert isinstance(value, FrozenDict)
+        return value
+
+
+# ---------------------------------------------------------------------------
 # Response builder — computes response_commitment, then constructs final
 # AdapterResponse in one step. The builder echoes binding fields from the
 # request, not from a local profile, so the response commits to the request
@@ -873,6 +964,42 @@ def build_invalid_input_response(
         receipt=None,
         state_violations=(),
         projection_warnings=(),
+    )
+
+
+def build_boundary_failure_response(
+    *,
+    binding_hash: str,
+    input_bytes_hash: str,
+    invalid: InvalidInput,
+) -> BoundaryFailureResponse:
+    """Commit a typed failure when raw bytes cannot form an AdapterRequest."""
+
+    if type(invalid) is not InvalidInput:
+        raise TypeError("invalid must be an InvalidInput")
+    details = invalid.as_json()
+    body = freeze_json(
+        {
+            "schema": BOUNDARY_RESPONSE_SCHEMA,
+            "protocol_version": ADAPTER_PROTOCOL_VERSION,
+            "binding_hash": binding_hash,
+            "input_bytes_hash": input_bytes_hash,
+            "decision_kind": AdapterDecisionKind.INVALID_INPUT.value,
+            "reason_code": invalid.code.value,
+            "reason_details": details,
+        }
+    )
+    assert isinstance(body, FrozenDict)
+    commitment = canonical_hash(BOUNDARY_RESPONSE_HASH_DOMAIN, body)
+    return BoundaryFailureResponse(
+        schema=BOUNDARY_RESPONSE_SCHEMA,
+        protocol_version=ADAPTER_PROTOCOL_VERSION,
+        binding_hash=binding_hash,
+        input_bytes_hash=input_bytes_hash,
+        decision_kind=AdapterDecisionKind.INVALID_INPUT,
+        reason_code=invalid.code.value,
+        reason_details=details,
+        response_commitment=commitment,
     )
 
 

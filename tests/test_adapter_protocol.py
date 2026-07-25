@@ -656,6 +656,10 @@ def test_response_schema_is_distinct() -> None:
     assert ap.RESPONSE_SCHEMA == "popperpad/data-adapter-response/v1"
 
 
+def test_boundary_response_schema_is_distinct() -> None:
+    assert ap.BOUNDARY_RESPONSE_SCHEMA == "popperpad/data-adapter-boundary-response/v1"
+
+
 def test_source_manifest_schema_is_distinct() -> None:
     assert ap.SOURCE_MANIFEST_SCHEMA == "popperpad/data-adapter-source-manifest/v1"
 
@@ -666,9 +670,22 @@ def test_all_schemas_are_distinct_from_each_other() -> None:
         ap.BINDING_SCHEMA,
         ap.REQUEST_SCHEMA,
         ap.RESPONSE_SCHEMA,
+        ap.BOUNDARY_RESPONSE_SCHEMA,
         ap.SOURCE_MANIFEST_SCHEMA,
     }
-    assert len(schemas) == 5
+    assert len(schemas) == 6
+
+
+@pytest.mark.parametrize("codec_version", ["made-up-codec", "", "popperpad-json-int-v1"])
+def test_profile_rejects_unsupported_codec_version(codec_version: str) -> None:
+    with pytest.raises(ValueError, match="codec_version mismatch"):
+        dataclasses.replace(_minimal_profile(), codec_version=codec_version)
+
+
+@pytest.mark.parametrize("codec_version", ["made-up-codec", "", "popperpad-json-int-v1"])
+def test_source_manifest_rejects_unsupported_codec_version(codec_version: str) -> None:
+    with pytest.raises(ValueError, match="codec_version mismatch"):
+        dataclasses.replace(_minimal_source_manifest(), codec_version=codec_version)
 
 
 # ---------------------------------------------------------------------------
@@ -1219,6 +1236,42 @@ def test_build_invalid_input_response_works() -> None:
     assert response.effect_plan_hash is None
 
 
+def test_build_boundary_failure_response_requires_no_adapter_request() -> None:
+    invalid = ap.InvalidInput(
+        code=ap.InvalidInputCode.INVALID_UTF8,
+        field_path="$",
+        detail="invalid byte sequence",
+    )
+    response = ap.build_boundary_failure_response(
+        binding_hash=_DUMMY_HASH,
+        input_bytes_hash=_ANOTHER_HASH,
+        invalid=invalid,
+    )
+
+    assert response.schema == ap.BOUNDARY_RESPONSE_SCHEMA
+    assert response.binding_hash == _DUMMY_HASH
+    assert response.input_bytes_hash == _ANOTHER_HASH
+    assert response.decision_kind is ap.AdapterDecisionKind.INVALID_INPUT
+    assert response.reason_code == ap.InvalidInputCode.INVALID_UTF8.value
+    assert response.reason_details == invalid.as_json()
+    assert not hasattr(response, "request_id")
+    assert not hasattr(response, "request_hash")
+
+
+def test_boundary_failure_response_commitment_detects_tampering() -> None:
+    response = ap.build_boundary_failure_response(
+        binding_hash=_DUMMY_HASH,
+        input_bytes_hash=_ANOTHER_HASH,
+        invalid=ap.InvalidInput(
+            code=ap.InvalidInputCode.SCHEMA_MISMATCH,
+            field_path="$.schema",
+            detail="wrong schema",
+        ),
+    )
+    with pytest.raises(ValueError, match="boundary response_commitment"):
+        dataclasses.replace(response, input_bytes_hash=_THIRD_HASH)
+
+
 # ---------------------------------------------------------------------------
 # Hash domain separation tests.
 # ---------------------------------------------------------------------------
@@ -1243,6 +1296,14 @@ def test_request_and_response_use_distinct_hash_domains() -> None:
         post_state_hash=_DUMMY_HASH,
     )
     assert request.hash() != response.response_commitment
+
+
+def test_validate_state_request_rejects_non_null_command() -> None:
+    with pytest.raises(ValueError, match="VALIDATE_STATE operation requires a null command"):
+        dataclasses.replace(
+            _minimal_request(),
+            command=FrozenDict({"kind": "irrelevant"}),
+        )
 
 
 def test_profile_hash_is_deterministic() -> None:
