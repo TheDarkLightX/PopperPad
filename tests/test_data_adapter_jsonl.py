@@ -27,7 +27,12 @@ from popperpad.shells.data_adapter_jsonl import (
 from popperpad.refinement.profiles.market_single_slot_v1 import load_profile, load_binding
 from popperpad.refinement.finite_state import initial_abstract_state
 from popperpad.refinement.market_adapter import abstract_state_hash
-from popperpad.core.adapter_protocol import ADAPTER_PROTOCOL_VERSION, REQUEST_SCHEMA
+from popperpad.core.adapter_protocol import (
+    ADAPTER_PROTOCOL_VERSION,
+    BOUNDARY_RESPONSE_SCHEMA,
+    REQUEST_SCHEMA,
+)
+from popperpad.core.codec import sha256_bytes
 
 
 @pytest.fixture
@@ -143,8 +148,12 @@ def test_parse_accepts_canonical_json() -> None:
 def test_invalid_json_returns_invalid_input(profile, binding) -> None:
     resp = process_line(b'not json', profile, binding)
     parsed = json.loads(resp)
+    assert parsed["schema"] == BOUNDARY_RESPONSE_SCHEMA
     assert parsed["decision_kind"] == "invalid_input"
     assert parsed["reason_code"] == "non_canonical_json"
+    assert parsed["input_bytes_hash"] == sha256_bytes(b"not json")
+    assert "request_id" not in parsed
+    assert "request_hash" not in parsed
 
 
 def test_duplicate_keys_returns_invalid_input(profile, binding) -> None:
@@ -165,14 +174,14 @@ def test_non_utf8_returns_distinct_invalid_input_code(profile, binding) -> None:
     raw = b'{"a":1}\xff'
     parsed = json.loads(process_line(raw, profile, binding))
     assert parsed["reason_code"] == "invalid_utf8"
-    assert parsed["reason_details"]["input_bytes_hash"].startswith("sha256:")
+    assert parsed["input_bytes_hash"] == sha256_bytes(raw)
 
 
 def test_float_returns_distinct_invalid_input_code(profile, binding) -> None:
     raw = b'{"a":1.5}'
     parsed = json.loads(process_line(raw, profile, binding))
     assert parsed["reason_code"] == "float_not_allowed"
-    assert parsed["reason_details"]["input_bytes_hash"].startswith("sha256:")
+    assert parsed["input_bytes_hash"] == sha256_bytes(raw)
 
 
 def test_non_object_request_returns_invalid_input(profile, binding) -> None:
@@ -259,7 +268,18 @@ def test_oversized_request_is_rejected_and_bound_to_input_hash(profile, binding)
     parsed = json.loads(process_line(raw, profile, binding))
     assert parsed["decision_kind"] == "invalid_input"
     assert parsed["reason_code"] == "input_too_large"
-    assert parsed["reason_details"]["input_bytes_hash"].startswith("sha256:")
+    assert parsed["input_bytes_hash"] == sha256_bytes(raw)
+
+
+def test_validate_state_with_command_returns_typed_boundary_failure(profile, binding) -> None:
+    d = _canonical_request_dict(
+        binding_hash=binding.hash(),
+        command={"kind": "open_bounty"},
+    )
+    parsed = json.loads(process_line(_canonical_bytes(d), profile, binding))
+    assert parsed["schema"] == BOUNDARY_RESPONSE_SCHEMA
+    assert parsed["reason_code"] == "abstract_command_out_of_domain"
+    assert parsed["reason_details"]["field_path"] == "$.command"
 
 
 # ---------------------------------------------------------------------------

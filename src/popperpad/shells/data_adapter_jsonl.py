@@ -28,14 +28,13 @@ from ..core.adapter_protocol import (
     ADAPTER_PROTOCOL_VERSION,
     REQUEST_SCHEMA,
     AdapterBinding,
-    AdapterDecisionKind,
     AdapterOperation,
     AdapterRequest,
     DataAdapterProfile,
     ExecutionContext,
     InvalidInput,
     InvalidInputCode,
-    build_response,
+    build_boundary_failure_response,
     require_sha256_ref,
 )
 from ..core.codec import canonical_json_bytes, sha256_bytes
@@ -44,7 +43,6 @@ from ..refinement.market_adapter import apply_data_adapter
 from ..refinement.profiles.market_single_slot_v1 import load_profile, load_binding
 
 
-_ZERO_HASH = "sha256:" + "0" * 64
 MAX_REQUEST_BYTES = 1_048_576
 _REQUEST_FIELDS = frozenset(
     {
@@ -333,6 +331,12 @@ def _build_request(frozen: FrozenDict[JsonValue]) -> AdapterRequest:
             "$.command",
             "step operation requires a command",
         )
+    if operation is AdapterOperation.VALIDATE_STATE and command_raw is not None:
+        raise RequestValidationError(
+            InvalidInputCode.ABSTRACT_COMMAND_OUT_OF_DOMAIN,
+            "$.command",
+            "validate_state operation requires a null command",
+        )
 
     ctx_raw = frozen.get("execution_context")
     if not isinstance(ctx_raw, FrozenDict):
@@ -418,43 +422,13 @@ def _invalid_input_bytes(
     detail: str,
     input_bytes_hash: str,
 ) -> bytes:
-    """Build an INVALID_INPUT response for boundary parse failures.
+    """Build a committed INVALID_INPUT response without inventing a request."""
 
-    Uses the caller-supplied binding_hash from the failed request when
-    available, falling back to a boundary-failure request.
-    """
-
-    dummy = AdapterRequest(
-        schema=REQUEST_SCHEMA,
-        protocol_version=ADAPTER_PROTOCOL_VERSION,
-        request_id="boundary-failure",
-        case_id="boundary-failure",
-        binding_hash=binding.hash(),
-        operation=AdapterOperation.VALIDATE_STATE,
-        state=FrozenDict(),
-        command=None,
-        execution_context=ExecutionContext(time_class="pre_deadline", now_epoch_s=0),
-        expected_pre_state_hash=_ZERO_HASH,
-    )
     invalid = InvalidInput(code=code, field_path=field_path, detail=detail)
-    reason_details = freeze_json(
-        {
-            "code": invalid.code.value,
-            "field_path": invalid.field_path,
-            "detail": invalid.detail,
-            "input_bytes_hash": input_bytes_hash,
-        }
-    )
-    assert isinstance(reason_details, FrozenDict)
-    response = build_response(
-        request=dummy,
-        decision_kind=AdapterDecisionKind.INVALID_INPUT,
-        reason_code=invalid.code.value,
-        reason_details=reason_details,
-        pre_state=FrozenDict(),
-        pre_state_hash=_ZERO_HASH,
-        post_state=None,
-        post_state_hash=None,
+    response = build_boundary_failure_response(
+        binding_hash=binding.hash(),
+        input_bytes_hash=input_bytes_hash,
+        invalid=invalid,
     )
     return serialize_json(response.as_json())
 
