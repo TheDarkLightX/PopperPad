@@ -393,12 +393,10 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
     @classmethod
     def from_json(cls, data: FrozenDict[JsonValue]) -> "SingleSlotAbstractCommand":
         kind = AbstractCommandKind(data["kind"])
-        expected = {"kind"}
-        if kind is AbstractCommandKind.VERIFY_SUBMISSION:
-            expected.add("accepted")
-        elif kind is AbstractCommandKind.RESOLVE_CHALLENGE:
-            expected.add("upheld")
-        _require_exact_fields(data, frozenset(expected), "command")
+        allowed = frozenset({"kind", "accepted", "upheld"})
+        unknown = sorted(frozenset(data) - allowed)
+        if unknown:
+            raise ValueError(f"command contains unknown fields: {unknown}")
         accepted = data.get("accepted")
         upheld = data.get("upheld")
         return cls(kind=kind, accepted=accepted, upheld=upheld)
