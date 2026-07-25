@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hypothesis import given, assume, strategies as st
+from hypothesis import given, strategies as st
 
 from popperpad.adapters.bundle import Bundle, build_manifest, bundle_root
 from popperpad.canonical import stable_sha256
@@ -8,7 +8,18 @@ from popperpad.refs import Ref
 
 
 def _ref_strategy():
-    return st.builds(lambda hex_: Ref("sha256:" + hex_), st.from_regex(r"[0-9a-f]{64}", fullmatch=True))
+    return st.binary(min_size=32, max_size=32).map(
+        lambda value: Ref("sha256:" + value.hex())
+    )
+
+
+def _missing_ref(refs: tuple[Ref, ...]) -> Ref:
+    existing = frozenset(refs)
+    for value in range(len(refs) + 1):
+        candidate = Ref("sha256:" + f"{value:064x}")
+        if candidate not in existing:
+            return candidate
+    raise AssertionError("bounded missing-reference search was exhausted")
 
 
 @st.composite
@@ -83,8 +94,7 @@ def test_bundle_root_is_deterministic(bundle_id, object_refs, blob_refs, entry_r
 def test_bundle_root_changes_when_content_changes(bundle_id, object_refs, blob_refs, entry_refs, previous_bundle_refs):
     bundle = Bundle(bundle_id=bundle_id, object_refs=object_refs, blob_refs=blob_refs, entry_refs=entry_refs, previous_bundle_refs=previous_bundle_refs)
     manifest = build_manifest(bundle, created_at="2026-01-01T00:00:00Z")
-    extra = Ref("sha256:" + "0" * 64)
-    assume(extra not in object_refs)
+    extra = _missing_ref(object_refs)
     all_refs = sorted(list(object_refs) + [extra])
     bundle2 = Bundle(bundle_id=bundle_id, object_refs=tuple(all_refs), blob_refs=blob_refs, entry_refs=entry_refs, previous_bundle_refs=previous_bundle_refs)
     manifest2 = build_manifest(bundle2, created_at="2026-01-01T00:00:00Z")
