@@ -595,7 +595,7 @@ def test_payable_state_rejects_unverified_submission_ids() -> None:
     )
     assert isinstance(decision, Reject)
     assert decision.code == "INVALID_STATE"
-    assert "verified submissions" in decision.details["reason"]
+    assert "payable_submission_not_verified" in decision.details["reason"]
 
 
 def test_market_state_rejects_duplicate_and_dangling_challenges() -> None:
@@ -627,7 +627,7 @@ def test_market_state_rejects_duplicate_and_dangling_challenges() -> None:
     )
     assert isinstance(duplicate_decision, Reject)
     assert duplicate_decision.code == "INVALID_STATE"
-    assert "challenge ids must be unique" in duplicate_decision.details["reason"]
+    assert "duplicate_challenge_id" in duplicate_decision.details["reason"]
 
     dangling = replace(
         challenged.next_state,
@@ -640,7 +640,7 @@ def test_market_state_rejects_duplicate_and_dangling_challenges() -> None:
     )
     assert isinstance(dangling_decision, Reject)
     assert dangling_decision.code == "INVALID_STATE"
-    assert "existing submissions" in dangling_decision.details["reason"]
+    assert "challenge_unknown_submission" in dangling_decision.details["reason"]
 
 
 def test_market_state_rejects_payable_ids_outside_payable_lifecycle() -> None:
@@ -655,7 +655,7 @@ def test_market_state_rejects_payable_ids_outside_payable_lifecycle() -> None:
     )
     assert isinstance(open_decision, Reject)
     assert open_decision.code == "INVALID_STATE"
-    assert "inconsistent with the bounty phase" in open_decision.details["reason"]
+    assert "open_has_payable_ids" in open_decision.details["reason"]
 
     payable = apply_market_command(
         verified_state(),
@@ -676,4 +676,4 @@ def test_market_state_rejects_payable_ids_outside_payable_lifecycle() -> None:
     )
     assert isinstance(payable_decision, Reject)
     assert payable_decision.code == "INVALID_STATE"
-    assert "must contain a verified submission" in payable_decision.details["reason"]
+    assert "payable_without_submission" in payable_decision.details["reason"]

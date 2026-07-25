@@ -1,0 +1,239 @@
+"""Tests for the strict bytes-boundary JSONL shell.
+
+Tests verify:
+- Strict canonical JSON parsing: duplicate keys, trailing content, non-UTF-8,
+  non-canonical byte encodings all rejected.
+- Boundary failures return committed INVALID_INPUT responses.
+- Valid requests are processed correctly.
+- Caller-supplied wire headers (schema, protocol_version, binding_hash)
+  are preserved, not replaced.
+- Floats where integers are expected are rejected.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+
+import pytest
+
+from popperpad.shells.data_adapter_jsonl import (
+    StrictJSONParseError,
+    parse_canonical_json,
+    process_line,
+    run_jsonl_shell,
+)
+from popperpad.refinement.profiles.market_single_slot_v1 import load_profile, load_binding
+from popperpad.refinement.finite_state import initial_abstract_state
+from popperpad.refinement.market_adapter import abstract_state_hash
+from popperpad.core.adapter_protocol import ADAPTER_PROTOCOL_VERSION, REQUEST_SCHEMA
+
+
+@pytest.fixture
+def profile():
+    return load_profile()
+
+
+@pytest.fixture
+def binding(profile):
+    return load_binding(profile)
+
+
+def _canonical_request_dict(**overrides) -> dict:
+    """Build a canonical request dict with required wire headers."""
+
+    initial = initial_abstract_state()
+    base = {
+        "binding_hash": overrides.pop("binding_hash", None),
+        "case_id": "c1",
+        "command": None,
+        "execution_context": {"now_epoch_s": 100, "time_class": "pre_deadline"},
+        "expected_pre_state_hash": overrides.pop("expected_pre_state_hash", abstract_state_hash(initial)),
+        "operation": "validate_state",
+        "protocol_version": ADAPTER_PROTOCOL_VERSION,
+        "request_id": "r1",
+        "schema": REQUEST_SCHEMA,
+        "state": {
+            "bond_atoms": 0,
+            "challenge_opened_time_class": "none",
+            "challenge_status": "none",
+            "deposit_atoms": 0,
+            "escrow_atoms": 0,
+            "paid": False,
+            "payable": False,
+            "phase": "draft",
+            "processed_command_mask": 0,
+            "settled": False,
+            "submission_status": "none",
+            "submission_time_class": "none",
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+def _canonical_bytes(d: dict) -> bytes:
+    return json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Strict canonical JSON parsing tests.
+# ---------------------------------------------------------------------------
+
+def test_parse_rejects_duplicate_keys() -> None:
+    with pytest.raises(StrictJSONParseError, match="duplicate"):
+        parse_canonical_json(b'{"a":1,"a":2}')
+
+
+def test_parse_rejects_nested_duplicate_keys() -> None:
+    with pytest.raises(StrictJSONParseError, match="duplicate"):
+        parse_canonical_json(b'{"outer":{"inner":1,"inner":2}}')
+
+
+def test_parse_rejects_trailing_content() -> None:
+    with pytest.raises(StrictJSONParseError, match="trailing"):
+        parse_canonical_json(b'{"a":1} garbage')
+
+
+def test_parse_rejects_non_utf8() -> None:
+    with pytest.raises(StrictJSONParseError, match="utf"):
+        parse_canonical_json(b'{"a":1}\xff\xfe')
+
+
+def test_parse_rejects_empty_input() -> None:
+    with pytest.raises(StrictJSONParseError, match="empty"):
+        parse_canonical_json(b'')
+
+
+def test_parse_rejects_invalid_json() -> None:
+    with pytest.raises(StrictJSONParseError):
+        parse_canonical_json(b'not json at all')
+
+
+def test_parse_rejects_non_canonical_byte_encoding() -> None:
+    """Whitespace inside JSON is not canonical — must reject."""
+    with pytest.raises(StrictJSONParseError, match="canonical"):
+        parse_canonical_json(b'{ "a" : 1 }')
+
+
+def test_parse_rejects_non_canonical_key_order() -> None:
+    """Keys not in sorted order is non-canonical — must reject."""
+    with pytest.raises(StrictJSONParseError, match="canonical"):
+        parse_canonical_json(b'{"b":2,"a":1}')
+
+
+def test_parse_accepts_canonical_json() -> None:
+    # Keys must be sorted, no whitespace, no trailing newline (that's the line delimiter)
+    result = parse_canonical_json(b'{"a":1,"b":[1,2,3]}')
+    assert result == {"a": 1, "b": [1, 2, 3]}
+
+
+# ---------------------------------------------------------------------------
+# Boundary failure → INVALID_INPUT tests.
+# ---------------------------------------------------------------------------
+
+def test_invalid_json_returns_invalid_input(profile, binding) -> None:
+    resp = process_line(b'not json', profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "non_canonical_json"
+
+
+def test_duplicate_keys_returns_invalid_input(profile, binding) -> None:
+    resp = process_line(b'{"a":1,"a":2}', profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "non_canonical_json"
+
+
+def test_non_canonical_bytes_returns_invalid_input(profile, binding) -> None:
+    resp = process_line(b'{ "a" : 1 }', profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "non_canonical_json"
+
+
+def test_non_object_request_returns_invalid_input(profile, binding) -> None:
+    resp = process_line(b'[1,2,3]', profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+
+
+def test_missing_request_id_returns_invalid_input(profile, binding) -> None:
+    d = _canonical_request_dict()
+    del d["request_id"]
+    resp = process_line(_canonical_bytes(d), profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+
+
+# ---------------------------------------------------------------------------
+# Wire header preservation tests (defect 5).
+# ---------------------------------------------------------------------------
+
+def test_wrong_schema_returns_invalid_input(profile, binding) -> None:
+    d = _canonical_request_dict(binding_hash=binding.hash(), schema="wrong/schema")
+    resp = process_line(_canonical_bytes(d), profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+
+
+def test_wrong_protocol_version_returns_invalid_input(profile, binding) -> None:
+    d = _canonical_request_dict(binding_hash=binding.hash(), protocol_version="wrong")
+    resp = process_line(_canonical_bytes(d), profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+
+
+def test_wrong_binding_hash_returns_invalid_input(profile, binding) -> None:
+    wrong_hash = "sha256:" + "b" * 64
+    d = _canonical_request_dict(binding_hash=wrong_hash)
+    resp = process_line(_canonical_bytes(d), profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "invalid_input"
+    assert parsed["reason_code"] == "binding_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# Valid request processing tests.
+# ---------------------------------------------------------------------------
+
+def test_valid_validate_state_request(profile, binding) -> None:
+    d = _canonical_request_dict(binding_hash=binding.hash())
+    resp = process_line(_canonical_bytes(d), profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "accept"
+
+
+def test_valid_step_request(profile, binding) -> None:
+    initial = initial_abstract_state()
+    d = _canonical_request_dict(
+        binding_hash=binding.hash(),
+        operation="step",
+        command={"kind": "open_bounty"},
+        expected_pre_state_hash=abstract_state_hash(initial),
+    )
+    resp = process_line(_canonical_bytes(d), profile, binding)
+    parsed = json.loads(resp)
+    assert parsed["decision_kind"] == "accept"
+    assert parsed["post_state"]["phase"] == "open"
+
+
+# ---------------------------------------------------------------------------
+# JSONL shell end-to-end test.
+# ---------------------------------------------------------------------------
+
+def test_run_jsonl_shell_processes_multiple_lines(profile, binding) -> None:
+    valid = _canonical_request_dict(binding_hash=binding.hash())
+    lines = [
+        _canonical_bytes(valid).decode("utf-8"),
+        "not valid json",
+    ]
+    stdin = io.BytesIO(("\n".join(lines) + "\n").encode("utf-8"))
+    stdout = io.BytesIO()
+    run_jsonl_shell(stdin, stdout)
+    output = stdout.getvalue()
+    responses = [json.loads(line) for line in output.strip().split(b"\n") if line]
+    assert len(responses) == 2
+    assert responses[0]["decision_kind"] == "accept"
+    assert responses[1]["decision_kind"] == "invalid_input"
