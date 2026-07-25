@@ -251,6 +251,8 @@ def _validate_source_path(path: object, field_path: str) -> str:
         raise ValueError(f"{field_path} must be relative, not absolute: {path}")
     if ".." in path.split("/"):
         raise ValueError(f"{field_path} must not contain traversal: {path}")
+    if "." in path.split("/"):
+        raise ValueError(f"{field_path} must not contain a dot segment: {path}")
     if "\\" in path:
         raise ValueError(f"{field_path} must not contain backslashes: {path}")
     if "//" in path:
@@ -597,10 +599,14 @@ class AdapterResponse(DeeplyImmutable):
             raise TypeError("reason_details must be a FrozenDict")
         if type(self.pre_state) is not FrozenDict:
             raise TypeError("pre_state must be a FrozenDict")
+        if self.post_state is not None and type(self.post_state) is not FrozenDict:
+            raise TypeError("post_state must be a FrozenDict when present")
         if type(self.effects) is not tuple:
             raise TypeError("effects must be a tuple")
         if any(type(value) is not FrozenDict for value in self.effects):
             raise TypeError("effects must contain FrozenDict values")
+        if self.receipt is not None and type(self.receipt) is not FrozenDict:
+            raise TypeError("receipt must be a FrozenDict when present")
         if type(self.state_violations) is not tuple:
             raise TypeError("state_violations must be a tuple")
         if any(type(value) is not FrozenDict for value in self.state_violations):
@@ -636,6 +642,20 @@ class AdapterResponse(DeeplyImmutable):
             raise ValueError("INVALID_INPUT must have null receipt")
         if type(self.reason_code) is not str or not self.reason_code:
             raise ValueError("INVALID_INPUT requires a non-empty reason_code")
+        try:
+            code = InvalidInputCode(self.reason_code)
+        except ValueError as exc:
+            raise ValueError(
+                "INVALID_INPUT reason_code must be a closed InvalidInputCode"
+            ) from exc
+        if self.reason_details.get("code") != code.value:
+            raise ValueError("INVALID_INPUT reason_details.code must match reason_code")
+        _require_nonempty_str(
+            self.reason_details.get("field_path"),
+            "AdapterResponse.reason_details.field_path",
+        )
+        if type(self.reason_details.get("detail")) is not str:
+            raise TypeError("AdapterResponse.reason_details.detail must be a string")
 
     def _assert_reject_shape(self) -> None:
         if type(self.reason_code) is not str or not self.reason_code:

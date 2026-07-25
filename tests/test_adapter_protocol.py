@@ -753,6 +753,12 @@ def test_source_file_binding_rejects_traversal() -> None:
         ap.SourceFileBinding(path="../../etc/passwd", sha256=_DUMMY_HASH)
 
 
+@pytest.mark.parametrize("path", ["./file.py", "src/./file.py"])
+def test_source_file_binding_rejects_dot_segments(path: str) -> None:
+    with pytest.raises(ValueError, match="dot segment"):
+        ap.SourceFileBinding(path=path, sha256=_DUMMY_HASH)
+
+
 def test_source_file_binding_rejects_backslash() -> None:
     with pytest.raises(ValueError, match="backslash"):
         ap.SourceFileBinding(path="src\\file.py", sha256=_DUMMY_HASH)
@@ -950,6 +956,48 @@ def test_invalid_input_rejects_non_null_effect_plan_hash() -> None:
         )
 
 
+def test_invalid_input_rejects_unknown_reason_code() -> None:
+    request = _minimal_request()
+    with pytest.raises(ValueError, match="closed InvalidInputCode"):
+        ap.build_response(
+            request=request,
+            decision_kind=ap.AdapterDecisionKind.INVALID_INPUT,
+            reason_code="totally_unknown",
+            reason_details=FrozenDict(
+                {
+                    "code": "totally_unknown",
+                    "field_path": "$",
+                    "detail": "unknown",
+                }
+            ),
+            pre_state=FrozenDict(),
+            pre_state_hash=_DUMMY_HASH,
+            post_state=None,
+            post_state_hash=None,
+        )
+
+
+def test_invalid_input_rejects_reason_detail_code_mismatch() -> None:
+    request = _minimal_request()
+    with pytest.raises(ValueError, match="must match reason_code"):
+        ap.build_response(
+            request=request,
+            decision_kind=ap.AdapterDecisionKind.INVALID_INPUT,
+            reason_code=ap.InvalidInputCode.SCHEMA_MISMATCH.value,
+            reason_details=FrozenDict(
+                {
+                    "code": ap.InvalidInputCode.INVALID_UTF8.value,
+                    "field_path": "$.schema",
+                    "detail": "wrong schema",
+                }
+            ),
+            pre_state=FrozenDict(),
+            pre_state_hash=_DUMMY_HASH,
+            post_state=None,
+            post_state_hash=None,
+        )
+
+
 def test_reject_requires_reason_code() -> None:
     request = _minimal_request()
     with pytest.raises(ValueError, match="REJECT requires a non-empty reason_code"):
@@ -1042,6 +1090,40 @@ def test_accept_requires_receipt() -> None:
             post_state=FrozenDict({"phase": "open"}),
             post_state_hash=_ANOTHER_HASH,
             effect_plan_hash=_DUMMY_HASH,
+        )
+
+
+def test_accept_requires_mapping_post_state() -> None:
+    request = _minimal_request()
+    with pytest.raises(TypeError, match="post_state must be a FrozenDict"):
+        ap.build_response(
+            request=request,
+            decision_kind=ap.AdapterDecisionKind.ACCEPT,
+            reason_code=None,
+            reason_details=FrozenDict(),
+            pre_state=FrozenDict({"phase": "draft"}),
+            pre_state_hash=_DUMMY_HASH,
+            post_state=7,  # type: ignore[arg-type]
+            post_state_hash=_ANOTHER_HASH,
+            effect_plan_hash=_DUMMY_HASH,
+            receipt=FrozenDict({"event": "opened"}),
+        )
+
+
+def test_accept_requires_mapping_receipt() -> None:
+    request = _minimal_request()
+    with pytest.raises(TypeError, match="receipt must be a FrozenDict"):
+        ap.build_response(
+            request=request,
+            decision_kind=ap.AdapterDecisionKind.ACCEPT,
+            reason_code=None,
+            reason_details=FrozenDict(),
+            pre_state=FrozenDict({"phase": "draft"}),
+            pre_state_hash=_DUMMY_HASH,
+            post_state=FrozenDict({"phase": "open"}),
+            post_state_hash=_ANOTHER_HASH,
+            effect_plan_hash=_DUMMY_HASH,
+            receipt=7,  # type: ignore[arg-type]
         )
 
 
