@@ -397,6 +397,10 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
         unknown = sorted(frozenset(data) - allowed)
         if unknown:
             raise ValueError(f"command contains unknown fields: {unknown}")
+        if kind is not AbstractCommandKind.VERIFY_SUBMISSION and "accepted" in data:
+            raise ValueError(f"accepted is not applicable to {kind.value}")
+        if kind is not AbstractCommandKind.RESOLVE_CHALLENGE and "upheld" in data:
+            raise ValueError(f"upheld is not applicable to {kind.value}")
         accepted = data.get("accepted")
         upheld = data.get("upheld")
         return cls(kind=kind, accepted=accepted, upheld=upheld)
