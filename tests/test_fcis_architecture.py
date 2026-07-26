@@ -28,6 +28,7 @@ from popperpad.core.recipe import ProcessObservation, RecipePlan, evaluate_obser
 
 
 CORE_MODULES = (
+    "popperpad.core.adapter_protocol",
     "popperpad.core.check",
     "popperpad.core.codec",
     "popperpad.core.commit",
@@ -39,6 +40,7 @@ CORE_MODULES = (
     "popperpad.core.recipe",
     "popperpad.core.result",
     "popperpad.core.values",
+    "popperpad.core.verifier",
 )
 FORBIDDEN_ROOT_IMPORTS = {
     "asyncio",
@@ -278,6 +280,16 @@ def test_decisions_reject_enum_members_with_mutable_values() -> None:
 
     with pytest.raises(TypeError, match="next_state"):
         Accept(next_state=MutableValueEnum.AUTHORITY, effects=(), receipt="r1")
+
+
+def test_dataclass_gate_covers_every_core_source_module() -> None:
+    package_dir = Path(importlib.import_module("popperpad.core").__file__).parent
+    discovered = {
+        f"popperpad.core.{source_path.stem}"
+        for source_path in package_dir.glob("*.py")
+        if source_path.stem != "__init__"
+    }
+    assert set(CORE_MODULES) == discovered
 
 
 def test_all_core_dataclasses_are_runtime_guarded_frozen_slotted_and_typed_immutable() -> None:

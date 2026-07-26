@@ -4,7 +4,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import ClassVar, TypeAlias
 
-from .codec import canonical_hash
+from .codec import canonical_hash, canonical_json_bytes, domain_frame, sha256_bytes
+from .verifier import ed25519_verifier_ref, verify_ed25519_signature
 from .result import Accept, CommittedFailure, Reject
 from .values import Amount, ClosedStrEnum, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
 
@@ -56,6 +57,22 @@ class ChallengeStatus(ClosedStrEnum):
         ("UPHELD", "upheld"),
         ("REJECTED", "rejected"),
     )
+
+
+class SubmissionVerdict(ClosedStrEnum):
+    __slots__ = ()
+
+    ACCEPTED: ClassVar[SubmissionVerdict]
+    REJECTED: ClassVar[SubmissionVerdict]
+    _symbols = (("ACCEPTED", "accepted"), ("REJECTED", "rejected"))
+
+
+class ChallengeVerdict(ClosedStrEnum):
+    __slots__ = ()
+
+    UPHELD: ClassVar[ChallengeVerdict]
+    REJECTED: ClassVar[ChallengeVerdict]
+    _symbols = (("UPHELD", "upheld"), ("REJECTED", "rejected"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,8 +155,11 @@ class MarketPolicy(DeeplyImmutable):
     slashable_findings: frozenset[str]
     treasury_ref: str = "protocol:treasury"
     challenge_resolution_seconds: int = 86_400
+    version: str = "popperpad/market-policy/v1"
 
     def __post_init__(self) -> None:
+        if type(self.version) is not str or not self.version:
+            raise ValueError("version must be a non-empty string")
         if not self.slashable_findings:
             raise ValueError("slashable_findings must be non-empty")
         if not self.treasury_ref:
@@ -181,6 +201,49 @@ class TransitionReceipt(DeeplyImmutable):
     command_hash: str
     state_hash: str
     effect_plan_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionVerifierStatement(DeeplyImmutable):
+    pre_state_hash: str
+    policy_hash: str
+    bounty_id: str
+    claim_ref: str
+    context_ref: str | None
+    submission_id: str
+    recipe_ref: str
+    evidence_refs: tuple[str, ...]
+    artifact_refs: tuple[str, ...]
+    outcome: SubmissionVerdict
+
+
+@dataclass(frozen=True, slots=True)
+class ChallengeVerifierStatement(DeeplyImmutable):
+    pre_state_hash: str
+    policy_hash: str
+    bounty_id: str
+    claim_ref: str
+    context_ref: str | None
+    challenge_id: str
+    submission_id: str
+    finding_kind: str
+    evidence_refs: tuple[str, ...]
+    outcome: ChallengeVerdict
+
+
+VerifierStatement: TypeAlias = SubmissionVerifierStatement | ChallengeVerifierStatement
+
+
+@dataclass(frozen=True, slots=True)
+class VerifierReceipt(DeeplyImmutable):
+    statement: VerifierStatement
+    public_key: bytes
+    signature: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class MarketEvidence(DeeplyImmutable):
+    verifier_receipts: tuple[VerifierReceipt, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +349,7 @@ REJECTION_PRECEDENCE = (
     "INVALID_STATE",
     "INVALID_POLICY",
     "INVALID_COMMAND",
+    "INVALID_EVIDENCE",
     "DUPLICATE_COMMAND",
     "WRONG_PHASE",
     "TIME_WINDOW",
@@ -306,6 +370,7 @@ def apply_market_command(
     state: BountyState,
     command: MarketCommand,
     policy: MarketPolicy,
+    evidence: MarketEvidence,
 ) -> MarketDecision:
     """Apply one total deterministic market transition over immutable values."""
 
@@ -329,6 +394,14 @@ def apply_market_command(
     invalid = _validate_common_command(command)
     if invalid is not None:
         return invalid
+    invalid_evidence = _validate_market_evidence(evidence)
+    if invalid_evidence is not None:
+        return _reject("INVALID_EVIDENCE", "evidence", invalid_evidence)
+    invalid_binding = _validate_command_evidence_binding(
+        state, command, policy, evidence
+    )
+    if invalid_binding is not None:
+        return invalid_binding
     if command.command_id in state.processed_command_ids:
         return _reject("DUPLICATE_COMMAND", "command_id", command.command_id)
 
@@ -337,11 +410,11 @@ def apply_market_command(
     if isinstance(command, SubmitCandidate):
         return _submit_candidate(state, command, policy)
     if isinstance(command, VerifySubmission):
-        return _verify_submission(state, command)
+        return _verify_submission(state, command, policy, evidence)
     if isinstance(command, OpenChallenge):
         return _open_challenge(state, command, policy)
     if isinstance(command, ResolveChallenge):
-        return _resolve_challenge(state, command, policy)
+        return _resolve_challenge(state, command, policy, evidence)
     if isinstance(command, AdvanceBounty):
         return _advance_bounty(state, command, policy)
     if isinstance(command, SettleBounty):
@@ -424,7 +497,12 @@ def _submit_candidate(
     return _accept(state, next_state, command, "candidate_submitted", (effect,))
 
 
-def _verify_submission(state: BountyState, command: VerifySubmission) -> MarketDecision:
+def _verify_submission(
+    state: BountyState,
+    command: VerifySubmission,
+    policy: MarketPolicy,
+    evidence: MarketEvidence,
+) -> MarketDecision:
     if not (_valid_id(command.submission_id) and _valid_ref(command.verifier_ref)):
         return _reject("INVALID_COMMAND", "submission_or_verifier", "invalid")
     if not _valid_ref(command.verifier_receipt_ref):
@@ -440,6 +518,15 @@ def _verify_submission(state: BountyState, command: VerifySubmission) -> MarketD
         return _reject("POLICY_MISMATCH", "submission_status", submission.status.value)
     if command.verifier_ref != submission.verifier_ref:
         return _reject("POLICY_MISMATCH", "verifier_ref", command.verifier_ref)
+    admitted = _admit_submission_receipt(
+        state=state,
+        command=command,
+        policy=policy,
+        evidence=evidence,
+        submission=submission,
+    )
+    if isinstance(admitted, Reject):
+        return admitted
 
     next_submission = replace(
         submission,
@@ -538,6 +625,7 @@ def _resolve_challenge(
     state: BountyState,
     command: ResolveChallenge,
     policy: MarketPolicy,
+    evidence: MarketEvidence,
 ) -> MarketDecision:
     if not (_valid_id(command.challenge_id) and _valid_ref(command.verifier_ref)):
         return _reject("INVALID_COMMAND", "challenge_or_verifier", "invalid")
@@ -559,6 +647,15 @@ def _resolve_challenge(
     submission = _submission(state, challenge.submission_id)
     if submission is None:
         return _reject("UNKNOWN_ENTITY", "submission_id", challenge.submission_id)
+    admitted = _admit_challenge_receipt(
+        state=state,
+        command=command,
+        policy=policy,
+        evidence=evidence,
+        challenge=challenge,
+    )
+    if isinstance(admitted, Reject):
+        return admitted
 
     next_challenge = replace(
         challenge,
@@ -977,6 +1074,37 @@ def _validate_market_policy(value: object) -> str | None:
         return "treasury_ref must be a non-empty string"
     if not _is_non_negative_int(value.challenge_resolution_seconds):
         return "challenge_resolution_seconds must be a non-negative integer"
+    if type(value.version) is not str or not value.version:
+        return "version must be a non-empty string"
+    return None
+
+
+def _validate_market_evidence(value: object) -> str | None:
+    if type(value) is not MarketEvidence:
+        return f"expected MarketEvidence, got {type(value).__name__}"
+    if type(value.verifier_receipts) is not tuple or any(
+        type(receipt) is not VerifierReceipt
+        or type(receipt.statement) not in (
+            SubmissionVerifierStatement,
+            ChallengeVerifierStatement,
+        )
+        for receipt in value.verifier_receipts
+    ):
+        return "verifier_receipts must contain exact VerifierReceipt values"
+    try:
+        refs: list[str] = []
+        for receipt in value.verifier_receipts:
+            receipt_ref = verifier_receipt_ref(receipt)
+            authentication_error = _verify_receipt_authentication(
+                receipt, receipt_ref
+            )
+            if authentication_error is not None:
+                return str(authentication_error.details["reason"])
+            refs.append(receipt_ref)
+    except (AttributeError, TypeError, ValueError) as exc:
+        return str(exc)
+    if len(set(refs)) != len(refs):
+        return "verifier receipt refs must be unique"
     return None
 
 
@@ -1031,6 +1159,339 @@ def _is_id_tuple(value: object) -> bool:
 
 def _is_non_negative_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def market_state_hash(state: BountyState) -> str:
+    return canonical_hash("market-state/v1", _state_json(state))
+
+
+def market_policy_hash(policy: MarketPolicy) -> str:
+    value = freeze_json(
+        {
+            "version": policy.version,
+            "minimum_bounty_atoms": policy.minimum_bounty.atoms,
+            "minimum_submission_bond_atoms": policy.minimum_submission_bond.atoms,
+            "minimum_challenge_deposit_atoms": policy.minimum_challenge_deposit.atoms,
+            "slashable_findings": tuple(sorted(policy.slashable_findings)),
+            "treasury_ref": policy.treasury_ref,
+            "challenge_resolution_seconds": policy.challenge_resolution_seconds,
+        }
+    )
+    assert isinstance(value, FrozenDict)
+    return canonical_hash("market-policy/v1", value)
+
+
+def verifier_statement_json(statement: VerifierStatement) -> FrozenDict[JsonValue]:
+    if type(statement) is SubmissionVerifierStatement:
+        raw: dict[str, JsonValue] = {
+            "schema": "popperpad/market-verifier-statement/submission/v1",
+            "pre_state_hash": statement.pre_state_hash,
+            "policy_hash": statement.policy_hash,
+            "bounty_id": statement.bounty_id,
+            "claim_ref": statement.claim_ref,
+            "context_ref": statement.context_ref,
+            "submission_id": statement.submission_id,
+            "recipe_ref": statement.recipe_ref,
+            "evidence_refs": statement.evidence_refs,
+            "artifact_refs": statement.artifact_refs,
+            "outcome": statement.outcome.value,
+        }
+    elif type(statement) is ChallengeVerifierStatement:
+        raw = {
+            "schema": "popperpad/market-verifier-statement/challenge/v1",
+            "pre_state_hash": statement.pre_state_hash,
+            "policy_hash": statement.policy_hash,
+            "bounty_id": statement.bounty_id,
+            "claim_ref": statement.claim_ref,
+            "context_ref": statement.context_ref,
+            "challenge_id": statement.challenge_id,
+            "submission_id": statement.submission_id,
+            "finding_kind": statement.finding_kind,
+            "evidence_refs": statement.evidence_refs,
+            "outcome": statement.outcome.value,
+        }
+    else:
+        raise TypeError("unsupported verifier statement type")
+    frozen = freeze_json(raw)
+    assert isinstance(frozen, FrozenDict)
+    return frozen
+
+
+def verifier_statement_signing_bytes(statement: VerifierStatement) -> bytes:
+    return domain_frame(
+        "market-verifier-statement/v1",
+        canonical_json_bytes(verifier_statement_json(statement)),
+    )
+
+
+def verifier_receipt_json(receipt: VerifierReceipt) -> FrozenDict[JsonValue]:
+    value = freeze_json(
+        {
+            "schema": "popperpad/market-verifier-receipt/v1",
+            "algorithm": "ed25519",
+            "public_key_hex": receipt.public_key.hex(),
+            "signature_hex": receipt.signature.hex(),
+            "statement": verifier_statement_json(receipt.statement),
+        }
+    )
+    assert isinstance(value, FrozenDict)
+    return value
+
+
+def verifier_receipt_ref(receipt: VerifierReceipt) -> str:
+    return sha256_bytes(canonical_json_bytes(verifier_receipt_json(receipt)))
+
+
+def _find_verifier_receipt(
+    evidence: MarketEvidence,
+    receipt_ref: str,
+) -> VerifierReceipt | None:
+    for receipt in evidence.verifier_receipts:
+        if verifier_receipt_ref(receipt) == receipt_ref:
+            return receipt
+    return None
+
+
+def _expected_submission_verifier_statement(
+    state: BountyState,
+    command: VerifySubmission,
+    policy: MarketPolicy,
+    submission: SubmissionState,
+) -> SubmissionVerifierStatement:
+    return SubmissionVerifierStatement(
+        pre_state_hash=market_state_hash(state),
+        policy_hash=market_policy_hash(policy),
+        bounty_id=state.terms.bounty_id,
+        claim_ref=state.terms.claim_ref,
+        context_ref=state.terms.context_ref,
+        submission_id=submission.submission_id,
+        recipe_ref=submission.recipe_ref,
+        evidence_refs=submission.evidence_refs,
+        artifact_refs=submission.artifact_refs,
+        outcome=(
+            SubmissionVerdict.ACCEPTED
+            if command.accepted
+            else SubmissionVerdict.REJECTED
+        ),
+    )
+
+
+def _expected_challenge_verifier_statement(
+    state: BountyState,
+    command: ResolveChallenge,
+    policy: MarketPolicy,
+    challenge: ChallengeState,
+) -> ChallengeVerifierStatement:
+    return ChallengeVerifierStatement(
+        pre_state_hash=market_state_hash(state),
+        policy_hash=market_policy_hash(policy),
+        bounty_id=state.terms.bounty_id,
+        claim_ref=state.terms.claim_ref,
+        context_ref=state.terms.context_ref,
+        challenge_id=challenge.challenge_id,
+        submission_id=challenge.submission_id,
+        finding_kind=challenge.finding_kind,
+        evidence_refs=challenge.evidence_refs,
+        outcome=(
+            ChallengeVerdict.UPHELD
+            if command.upheld
+            else ChallengeVerdict.REJECTED
+        ),
+    )
+
+
+def _validate_command_evidence_binding(
+    state: BountyState,
+    command: MarketCommand,
+    policy: MarketPolicy,
+    evidence: MarketEvidence,
+) -> Reject | None:
+    if type(command) is VerifySubmission:
+        receipt = _find_verifier_receipt(evidence, command.verifier_receipt_ref)
+        if receipt is None:
+            return None
+        if type(receipt.statement) is not SubmissionVerifierStatement:
+            return _reject("INVALID_EVIDENCE", "verifier_receipt", "wrong statement kind")
+        statement = receipt.statement
+        expected_outcome = (
+            SubmissionVerdict.ACCEPTED
+            if command.accepted
+            else SubmissionVerdict.REJECTED
+        )
+        if (
+            statement.pre_state_hash != market_state_hash(state)
+            or statement.policy_hash != market_policy_hash(policy)
+            or statement.bounty_id != state.terms.bounty_id
+            or statement.claim_ref != state.terms.claim_ref
+            or statement.context_ref != state.terms.context_ref
+            or statement.submission_id != command.submission_id
+            or statement.outcome is not expected_outcome
+        ):
+            return _reject(
+                "INVALID_EVIDENCE",
+                "verifier_receipt",
+                "statement is not bound to the current state, policy, command, and outcome",
+            )
+        submission = _submission(state, command.submission_id)
+        if submission is not None and statement != _expected_submission_verifier_statement(
+            state, command, policy, submission
+        ):
+            return _reject(
+                "INVALID_EVIDENCE",
+                "verifier_receipt",
+                "statement is not bound to the exact submission",
+            )
+        verifier_ref = ed25519_verifier_ref(receipt.public_key)
+        if verifier_ref != command.verifier_ref or (
+            submission is not None and verifier_ref != submission.verifier_ref
+        ):
+            return _reject(
+                "INVALID_EVIDENCE",
+                "verifier_ref",
+                "signing key does not match command",
+            )
+        return None
+
+    if type(command) is ResolveChallenge:
+        receipt = _find_verifier_receipt(evidence, command.verifier_receipt_ref)
+        if receipt is None:
+            return None
+        if type(receipt.statement) is not ChallengeVerifierStatement:
+            return _reject("INVALID_EVIDENCE", "verifier_receipt", "wrong statement kind")
+        statement = receipt.statement
+        expected_outcome = (
+            ChallengeVerdict.UPHELD
+            if command.upheld
+            else ChallengeVerdict.REJECTED
+        )
+        if (
+            statement.pre_state_hash != market_state_hash(state)
+            or statement.policy_hash != market_policy_hash(policy)
+            or statement.bounty_id != state.terms.bounty_id
+            or statement.claim_ref != state.terms.claim_ref
+            or statement.context_ref != state.terms.context_ref
+            or statement.challenge_id != command.challenge_id
+            or statement.outcome is not expected_outcome
+        ):
+            return _reject(
+                "INVALID_EVIDENCE",
+                "verifier_receipt",
+                "statement is not bound to the current state, policy, command, and outcome",
+            )
+        challenge = _challenge(state, command.challenge_id)
+        if challenge is not None and statement != _expected_challenge_verifier_statement(
+            state, command, policy, challenge
+        ):
+            return _reject(
+                "INVALID_EVIDENCE",
+                "verifier_receipt",
+                "statement is not bound to the exact challenge",
+            )
+        verifier_ref = ed25519_verifier_ref(receipt.public_key)
+        if verifier_ref != command.verifier_ref:
+            return _reject(
+                "INVALID_EVIDENCE",
+                "verifier_ref",
+                "signing key does not match command",
+            )
+    return None
+
+
+def _verify_receipt_authentication(
+    receipt: VerifierReceipt,
+    receipt_ref: str,
+) -> Reject | None:
+    try:
+        if verifier_receipt_ref(receipt) != receipt_ref:
+            return _reject("INVALID_EVIDENCE", "verifier_receipt_ref", "content ref mismatch")
+        signing_bytes = verifier_statement_signing_bytes(receipt.statement)
+    except (AttributeError, TypeError, ValueError) as exc:
+        return _reject("INVALID_EVIDENCE", "verifier_receipt", str(exc))
+    if not verify_ed25519_signature(
+        public_key=receipt.public_key,
+        signature=receipt.signature,
+        message=signing_bytes,
+    ):
+        return _reject("INVALID_EVIDENCE", "verifier_receipt", "invalid Ed25519 signature")
+    return None
+
+
+def _admit_submission_receipt(
+    *,
+    state: BountyState,
+    command: VerifySubmission,
+    policy: MarketPolicy,
+    evidence: MarketEvidence,
+    submission: SubmissionState,
+) -> SubmissionVerifierStatement | Reject:
+    receipt = _find_verifier_receipt(evidence, command.verifier_receipt_ref)
+    if receipt is None:
+        return _reject("MISSING_EVIDENCE", "verifier_receipt_ref", command.verifier_receipt_ref)
+    authentication_error = _verify_receipt_authentication(
+        receipt,
+        command.verifier_receipt_ref,
+    )
+    if authentication_error is not None:
+        return authentication_error
+    if type(receipt.statement) is not SubmissionVerifierStatement:
+        return _reject("INVALID_EVIDENCE", "verifier_receipt", "wrong statement kind")
+    try:
+        verifier_ref = ed25519_verifier_ref(receipt.public_key)
+    except ValueError as exc:
+        return _reject("INVALID_EVIDENCE", "verifier_public_key", str(exc))
+    expected = _expected_submission_verifier_statement(
+        state, command, policy, submission
+    )
+    if receipt.statement != expected:
+        return _reject(
+            "INVALID_EVIDENCE",
+            "verifier_receipt",
+            "statement is not bound to the exact state, policy, subject, and outcome",
+        )
+    if verifier_ref != command.verifier_ref or verifier_ref != submission.verifier_ref:
+        return _reject("INVALID_EVIDENCE", "verifier_ref", "signing key does not match command")
+    if verifier_ref not in state.terms.accepted_verifier_refs:
+        return _reject("POLICY_MISMATCH", "verifier_ref", verifier_ref)
+    return receipt.statement
+
+
+def _admit_challenge_receipt(
+    *,
+    state: BountyState,
+    command: ResolveChallenge,
+    policy: MarketPolicy,
+    evidence: MarketEvidence,
+    challenge: ChallengeState,
+) -> ChallengeVerifierStatement | Reject:
+    receipt = _find_verifier_receipt(evidence, command.verifier_receipt_ref)
+    if receipt is None:
+        return _reject("MISSING_EVIDENCE", "verifier_receipt_ref", command.verifier_receipt_ref)
+    authentication_error = _verify_receipt_authentication(
+        receipt,
+        command.verifier_receipt_ref,
+    )
+    if authentication_error is not None:
+        return authentication_error
+    if type(receipt.statement) is not ChallengeVerifierStatement:
+        return _reject("INVALID_EVIDENCE", "verifier_receipt", "wrong statement kind")
+    try:
+        verifier_ref = ed25519_verifier_ref(receipt.public_key)
+    except ValueError as exc:
+        return _reject("INVALID_EVIDENCE", "verifier_public_key", str(exc))
+    expected = _expected_challenge_verifier_statement(
+        state, command, policy, challenge
+    )
+    if receipt.statement != expected:
+        return _reject(
+            "INVALID_EVIDENCE",
+            "verifier_receipt",
+            "statement is not bound to the exact state, policy, subject, and outcome",
+        )
+    if verifier_ref != command.verifier_ref:
+        return _reject("INVALID_EVIDENCE", "verifier_ref", "signing key does not match command")
+    if verifier_ref not in state.terms.accepted_verifier_refs:
+        return _reject("POLICY_MISMATCH", "verifier_ref", verifier_ref)
+    return receipt.statement
 
 
 def _accept(
