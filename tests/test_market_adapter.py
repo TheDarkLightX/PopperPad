@@ -76,6 +76,8 @@ from popperpad.refinement.market_adapter import (
     project_state,
     parse_market_profile,
     abstract_state_hash,
+    command_json_with_verifier_receipt,
+    parse_verifier_receipt_value,
 )
 from popperpad.refinement.profiles.market_single_slot_v1 import (
     load_profile,
@@ -104,7 +106,8 @@ def market(profile):
     return parse_market_profile(profile.semantic_profile)
 
 
-_TEST_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+_TEST_VERIFIER_SEED = bytes(range(1, 33))
+_TEST_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(_TEST_VERIFIER_SEED)
 _TEST_PUBLIC_KEY = _TEST_PRIVATE_KEY.public_key().public_bytes(
     encoding=serialization.Encoding.Raw,
     format=serialization.PublicFormat.Raw,
@@ -178,8 +181,10 @@ def _authority_command(
     state: SingleSlotAbstractState,
     cmd: SingleSlotAbstractCommand,
 ) -> FrozenDict:
-    receipt = _model_receipt_provider(market, state, cmd)
-    return replace(cmd, verifier_receipt=receipt).as_json()
+    receipt = parse_verifier_receipt_value(
+        _model_receipt_provider(market, state, cmd)
+    )
+    return command_json_with_verifier_receipt(cmd, receipt)
 
 
 def _make_request(
@@ -585,17 +590,16 @@ def test_command_from_json_rejects_irrelevant_fields() -> None:
         SingleSlotAbstractCommand.from_json(bad_cmd)
 
 
-def test_command_rejects_receipt_on_non_authority_kind() -> None:
-    with pytest.raises(ValueError, match="verifier_receipt is not applicable"):
-        SingleSlotAbstractCommand(
-            kind=AbstractCommandKind.OPEN_BOUNTY,
-            verifier_receipt=FrozenDict(),
-        )
+def test_abstract_command_value_excludes_verifier_evidence() -> None:
+    command = SingleSlotAbstractCommand(kind=AbstractCommandKind.OPEN_BOUNTY)
+    assert not hasattr(command, "verifier_receipt")
 
 
-def test_command_from_json_rejects_inapplicable_null_receipt() -> None:
-    bad_cmd = freeze_json({"kind": "open_bounty", "verifier_receipt": None})
-    with pytest.raises(ValueError, match="verifier_receipt is not applicable"):
+def test_command_from_json_rejects_embedded_verifier_evidence() -> None:
+    bad_cmd = freeze_json(
+        {"kind": "verify_submission", "accepted": True, "verifier_receipt": {}}
+    )
+    with pytest.raises(ValueError, match="command contains unknown fields"):
         SingleSlotAbstractCommand.from_json(bad_cmd)
 
 
@@ -1205,10 +1209,11 @@ def test_complete_enumeration_search_completes(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     assert result.search_complete is True
-    assert result.authority_evidence_complete is True
     assert result.budget_exhausted is False
     assert result.reachable_states > 0
     assert result.total_cases > 0
@@ -1223,43 +1228,36 @@ def test_enumeration_enforces_state_budget_per_successor(profile, binding) -> No
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result = enumerate_all_transitions(
-        profile, binding, max_states=3, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
+        max_states=3,
     )
 
     assert result.reachable_states == 3
     assert result.search_complete is False
-    assert result.authority_evidence_complete is True
     assert result.budget_exhausted is True
 
 
-def test_enumeration_without_authority_provider_is_not_complete(profile, binding) -> None:
+def test_enumeration_rejects_private_key_outside_profile(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
-    result = enumerate_all_transitions(profile, binding)
-
-    assert result.search_complete is False
-    assert result.authority_evidence_complete is False
-    assert result.budget_exhausted is False
-
-
-def test_enumeration_rejects_inadmissible_authority_provider(profile, binding) -> None:
-    from popperpad.refinement.enumerator import enumerate_all_transitions
-
-    def invalid_provider(market, state, command):
-        receipt = thaw_json(_model_receipt_provider(market, state, command))
-        receipt["signature_hex"] = "00" * 64
-        invalid = freeze_json(receipt)
-        assert isinstance(invalid, FrozenDict)
-        return invalid
-
-    with pytest.raises(
-        RuntimeError,
-        match="receipt_provider produced inadmissible verifier evidence",
-    ):
+    with pytest.raises(ValueError, match="does not match"):
         enumerate_all_transitions(
             profile,
             binding,
-            receipt_provider=invalid_provider,
+            verifier_private_key=b"\x09" * 32,
+        )
+
+
+def test_enumeration_requires_exact_private_key_bytes(profile, binding) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    with pytest.raises(ValueError, match="exactly 32 bytes"):
+        enumerate_all_transitions(
+            profile,
+            binding,
+            verifier_private_key=b"short",
         )
 
 
@@ -1272,17 +1270,26 @@ def test_enumeration_rejects_invalid_state_budgets(
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     with pytest.raises(ValueError, match="max_states must be a positive integer"):
-        enumerate_all_transitions(profile, binding, max_states=max_states)
+        enumerate_all_transitions(
+            profile,
+            binding,
+            verifier_private_key=_TEST_VERIFIER_SEED,
+            max_states=max_states,
+        )
 
 
 def test_enumeration_corpus_hash_is_deterministic(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result1 = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     result2 = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     assert result1.corpus_hash == result2.corpus_hash
 
@@ -1291,7 +1298,9 @@ def test_enumeration_covers_all_command_variants(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     assert result.command_variants == 10
     assert result.time_classes == 5
@@ -1317,7 +1326,7 @@ def test_enumeration_uses_supplied_profile_time_representatives(profile, binding
     result = enumerate_all_transitions(
         shifted_profile,
         shifted_binding,
-        receipt_provider=_model_receipt_provider,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
 
     assert result.search_complete is True

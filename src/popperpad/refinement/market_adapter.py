@@ -50,8 +50,8 @@ from ..core.market import (
     ChallengeVerifierStatement,
     ChallengeVerdict,
     MarketCommand,
-    MarketEvidence,
     MarketEffect,
+    MarketEvidence,
     MarketPolicy,
     OpenBounty,
     OpenChallenge,
@@ -66,11 +66,21 @@ from ..core.market import (
     VerifierReceipt,
     VerifySubmission,
     apply_market_command,
+    challenge_verifier_statement,
+    submission_verifier_statement,
+    verifier_receipt_json,
     verifier_receipt_ref,
 )
 from ..core.market_invariants import market_state_violations
 from ..core.result import Accept, CommittedFailure, Reject
-from ..core.values import Amount, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
+from ..core.values import (
+    Amount,
+    DeeplyImmutable,
+    FrozenDict,
+    JsonValue,
+    freeze_json,
+    thaw_json,
+)
 from .finite_state import (
     AbstractChallengeStatus,
     AbstractCommandKind,
@@ -383,8 +393,7 @@ def concretize_command(
     abstract: SingleSlotAbstractState,
     cmd: SingleSlotAbstractCommand,
     now_epoch_s: int,
-    *,
-    verifier_receipt_ref_override: str | None = None,
+    verifier_receipt_ref_value: str | None = None,
 ) -> MarketCommand:
     """Concretize an abstract command into a concrete MarketCommand.
 
@@ -404,9 +413,8 @@ def concretize_command(
     if cmd.kind is AbstractCommandKind.VERIFY_SUBMISSION:
         return VerifySubmission(
             cmd_id, profile.submission_id, profile.verifier_ref,
-            verifier_receipt_ref_override or profile.verifier_receipt_ref,
-            cmd.accepted,
-            now_epoch_s,
+            verifier_receipt_ref_value or profile.verifier_receipt_ref,
+            cmd.accepted, now_epoch_s,
         )
     if cmd.kind is AbstractCommandKind.OPEN_CHALLENGE:
         return OpenChallenge(
@@ -417,9 +425,8 @@ def concretize_command(
     if cmd.kind is AbstractCommandKind.RESOLVE_CHALLENGE:
         return ResolveChallenge(
             cmd_id, profile.challenge_id, profile.verifier_ref,
-            verifier_receipt_ref_override or profile.challenge_receipt_ref,
-            cmd.upheld,
-            now_epoch_s,
+            verifier_receipt_ref_value or profile.challenge_receipt_ref,
+            cmd.upheld, now_epoch_s,
         )
     if cmd.kind is AbstractCommandKind.ADVANCE_BOUNTY:
         return AdvanceBounty(cmd_id, now_epoch_s)
@@ -432,6 +439,212 @@ def concretize_command(
     if cmd.kind is AbstractCommandKind.CANCEL_BOUNTY:
         return CancelBounty(cmd_id, profile.sponsor_ref, now_epoch_s)
     raise ValueError(f"unknown command kind: {cmd.kind}")
+
+
+def verifier_statement_for_abstract_command(
+    profile: SingleSlotMarketProfileData,
+    abstract: SingleSlotAbstractState,
+    cmd: SingleSlotAbstractCommand,
+    now_epoch_s: int,
+) -> SubmissionVerifierStatement | ChallengeVerifierStatement | None:
+    # Derive the exact statement an external verifier must authenticate.
+    state = concretize_state(profile, abstract)
+    command = concretize_command(profile, abstract, cmd, now_epoch_s)
+    if type(command) is VerifySubmission:
+        submission = next(
+            (
+                value
+                for value in state.submissions
+                if value.submission_id == command.submission_id
+            ),
+            None,
+        )
+        if submission is None:
+            return None
+        return submission_verifier_statement(
+            state, command, profile.policy, submission
+        )
+    if type(command) is ResolveChallenge:
+        challenge = next(
+            (
+                value
+                for value in state.challenges
+                if value.challenge_id == command.challenge_id
+            ),
+            None,
+        )
+        if challenge is None:
+            return None
+        return challenge_verifier_statement(
+            state, command, profile.policy, challenge
+        )
+    return None
+
+
+def command_json_with_verifier_receipt(
+    command: SingleSlotAbstractCommand,
+    receipt: VerifierReceipt,
+) -> FrozenDict[JsonValue]:
+    # Attach caller-supplied authenticated evidence without hiding it.
+    raw = thaw_json(command.as_json())
+    assert isinstance(raw, dict)
+    raw["verifier_receipt"] = thaw_json(verifier_receipt_json(receipt))
+    value = freeze_json(raw)
+    assert isinstance(value, FrozenDict)
+    return value
+
+
+def _parse_abstract_command_and_evidence(
+    data: FrozenDict[JsonValue],
+) -> tuple[SingleSlotAbstractCommand, MarketEvidence, str | None]:
+    has_receipt = "verifier_receipt" in data
+    command_data = FrozenDict(
+        (key, value) for key, value in data.items_tuple() if key != "verifier_receipt"
+    )
+    command = SingleSlotAbstractCommand.from_json(command_data)
+    needs_receipt = command.kind in {
+        AbstractCommandKind.VERIFY_SUBMISSION,
+        AbstractCommandKind.RESOLVE_CHALLENGE,
+    }
+    if has_receipt and not needs_receipt:
+        raise ValueError(
+            f"verifier_receipt is not applicable to {command.kind.value}"
+        )
+    if not has_receipt:
+        return command, MarketEvidence(), None
+    raw_receipt = data["verifier_receipt"]
+    if type(raw_receipt) is not FrozenDict:
+        raise ValueError("verifier_receipt must be an object")
+    receipt = parse_verifier_receipt_value(raw_receipt)
+    return command, MarketEvidence((receipt,)), verifier_receipt_ref(receipt)
+
+
+def parse_verifier_receipt_value(
+    data: FrozenDict[JsonValue],
+) -> VerifierReceipt:
+    # Strictly decode one immutable verifier receipt from canonical data.
+    _require_exact_fields(
+        data,
+        frozenset(
+            {
+                "schema",
+                "algorithm",
+                "public_key_hex",
+                "signature_hex",
+                "statement",
+            }
+        ),
+        "verifier_receipt",
+    )
+    if data["schema"] != "popperpad/market-verifier-receipt/v1":
+        raise ValueError("verifier_receipt schema mismatch")
+    if data["algorithm"] != "ed25519":
+        raise ValueError("verifier_receipt algorithm mismatch")
+    public_key = _decode_lower_hex(
+        data["public_key_hex"], 32, "verifier_receipt.public_key_hex"
+    )
+    signature = _decode_lower_hex(
+        data["signature_hex"], 64, "verifier_receipt.signature_hex"
+    )
+    statement_data = data["statement"]
+    if type(statement_data) is not FrozenDict:
+        raise ValueError("verifier_receipt.statement must be an object")
+    statement = _parse_verifier_statement(statement_data)
+    return VerifierReceipt(
+        statement=statement,
+        public_key=public_key,
+        signature=signature,
+    )
+
+
+def _parse_verifier_statement(
+    data: FrozenDict[JsonValue],
+) -> SubmissionVerifierStatement | ChallengeVerifierStatement:
+    schema = data.get("schema")
+    if schema == "popperpad/market-verifier-statement/submission/v1":
+        _require_exact_fields(
+            data,
+            frozenset(
+                {
+                    "schema",
+                    "pre_state_hash",
+                    "policy_hash",
+                    "bounty_id",
+                    "claim_ref",
+                    "context_ref",
+                    "submission_id",
+                    "recipe_ref",
+                    "evidence_refs",
+                    "artifact_refs",
+                    "outcome",
+                }
+            ),
+            "verifier_receipt.statement",
+        )
+        return SubmissionVerifierStatement(
+            pre_state_hash=_get_ref(data, "pre_state_hash"),
+            policy_hash=_get_ref(data, "policy_hash"),
+            bounty_id=_get_str(data, "bounty_id"),
+            claim_ref=_get_ref(data, "claim_ref"),
+            context_ref=_get_opt_ref(data, "context_ref"),
+            submission_id=_get_str(data, "submission_id"),
+            recipe_ref=_get_ref(data, "recipe_ref"),
+            evidence_refs=_get_ref_tuple(data, "evidence_refs"),
+            artifact_refs=_get_ref_tuple(data, "artifact_refs"),
+            outcome=SubmissionVerdict(_get_str(data, "outcome")),
+        )
+    if schema == "popperpad/market-verifier-statement/challenge/v1":
+        _require_exact_fields(
+            data,
+            frozenset(
+                {
+                    "schema",
+                    "pre_state_hash",
+                    "policy_hash",
+                    "bounty_id",
+                    "claim_ref",
+                    "context_ref",
+                    "challenge_id",
+                    "submission_id",
+                    "finding_kind",
+                    "evidence_refs",
+                    "outcome",
+                }
+            ),
+            "verifier_receipt.statement",
+        )
+        return ChallengeVerifierStatement(
+            pre_state_hash=_get_ref(data, "pre_state_hash"),
+            policy_hash=_get_ref(data, "policy_hash"),
+            bounty_id=_get_str(data, "bounty_id"),
+            claim_ref=_get_ref(data, "claim_ref"),
+            context_ref=_get_opt_ref(data, "context_ref"),
+            challenge_id=_get_str(data, "challenge_id"),
+            submission_id=_get_str(data, "submission_id"),
+            finding_kind=_get_str(data, "finding_kind"),
+            evidence_refs=_get_ref_tuple(data, "evidence_refs"),
+            outcome=ChallengeVerdict(_get_str(data, "outcome")),
+        )
+    raise ValueError("unsupported verifier statement schema")
+
+
+def _require_exact_fields(
+    data: FrozenDict[JsonValue],
+    expected: frozenset[str],
+    field_path: str,
+) -> None:
+    if frozenset(data) != expected:
+        raise ValueError(f"{field_path} has missing or unknown fields")
+
+
+def _decode_lower_hex(value: JsonValue, size: int, field_path: str) -> bytes:
+    if (
+        type(value) is not str
+        or len(value) != size * 2
+        or re.fullmatch(r"[0-9a-f]+", value) is None
+    ):
+        raise ValueError(f"{field_path} must be {size * 2} lowercase hex characters")
+    return bytes.fromhex(value)
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +807,9 @@ def _handle_step(
                               pre_state=abstract.as_json(), pre_state_hash=actual_pre_hash)
 
     try:
-        cmd = SingleSlotAbstractCommand.from_json(request.command)
+        cmd, evidence, receipt_ref = _parse_abstract_command_and_evidence(
+            request.command
+        )
     except (ValueError, TypeError, KeyError) as exc:
         return _invalid_input(request, InvalidInputCode.ABSTRACT_COMMAND_OUT_OF_DOMAIN,
                               "$.command", str(exc),
@@ -610,25 +825,17 @@ def _handle_step(
                               pre_state=abstract.as_json(), pre_state_hash=actual_pre_hash)
 
     try:
-        evidence = _command_market_evidence(cmd)
-        receipt_ref_override = (
-            verifier_receipt_ref(evidence.verifier_receipts[0])
-            if evidence.verifier_receipts
-            else None
-        )
         concrete_cmd = concretize_command(
-            market,
-            abstract,
-            cmd,
-            now,
-            verifier_receipt_ref_override=receipt_ref_override,
+            market, abstract, cmd, now, receipt_ref
         )
     except (ValueError, TypeError, KeyError) as exc:
         return _invalid_input(request, InvalidInputCode.ABSTRACT_COMMAND_OUT_OF_DOMAIN,
                               "$.command", str(exc),
                               pre_state=abstract.as_json(), pre_state_hash=actual_pre_hash)
 
-    decision = apply_market_command(concrete_state, concrete_cmd, market.policy, evidence)
+    decision = apply_market_command(
+        concrete_state, concrete_cmd, market.policy, evidence
+    )
 
     if isinstance(decision, Reject):
         return build_response(
@@ -692,139 +899,6 @@ def _handle_step(
         projection_warnings=(),
     )
 
-
-def _command_market_evidence(cmd: SingleSlotAbstractCommand) -> MarketEvidence:
-    if cmd.verifier_receipt is None:
-        return MarketEvidence()
-    return MarketEvidence((_parse_verifier_receipt(cmd.verifier_receipt),))
-
-
-def _parse_verifier_receipt(data: FrozenDict[JsonValue]) -> VerifierReceipt:
-    _require_exact_object_fields(
-        data,
-        frozenset(
-            {
-                "schema",
-                "algorithm",
-                "public_key_hex",
-                "signature_hex",
-                "statement",
-            }
-        ),
-        "verifier_receipt",
-    )
-    if _get_str(data, "schema") != "popperpad/market-verifier-receipt/v1":
-        raise ValueError("verifier_receipt.schema is not supported")
-    if _get_str(data, "algorithm") != "ed25519":
-        raise ValueError("verifier_receipt.algorithm must be ed25519")
-    return VerifierReceipt(
-        statement=_parse_verifier_statement(_get_dict(data, "statement")),
-        public_key=_decode_canonical_hex(data, "public_key_hex", byte_length=32),
-        signature=_decode_canonical_hex(data, "signature_hex", byte_length=64),
-    )
-
-
-def _parse_verifier_statement(
-    data: FrozenDict[JsonValue],
-) -> SubmissionVerifierStatement | ChallengeVerifierStatement:
-    schema = _get_str(data, "schema")
-    if schema == "popperpad/market-verifier-statement/submission/v1":
-        _require_exact_object_fields(
-            data,
-            frozenset(
-                {
-                    "schema",
-                    "pre_state_hash",
-                    "policy_hash",
-                    "bounty_id",
-                    "claim_ref",
-                    "context_ref",
-                    "submission_id",
-                    "recipe_ref",
-                    "evidence_refs",
-                    "artifact_refs",
-                    "outcome",
-                }
-            ),
-            "verifier_receipt.statement",
-        )
-        return SubmissionVerifierStatement(
-            pre_state_hash=_get_ref(data, "pre_state_hash"),
-            policy_hash=_get_ref(data, "policy_hash"),
-            bounty_id=_get_str(data, "bounty_id"),
-            claim_ref=_get_ref(data, "claim_ref"),
-            context_ref=_get_opt_ref(data, "context_ref"),
-            submission_id=_get_str(data, "submission_id"),
-            recipe_ref=_get_ref(data, "recipe_ref"),
-            evidence_refs=_get_ref_tuple(data, "evidence_refs"),
-            artifact_refs=_get_ref_tuple(data, "artifact_refs"),
-            outcome=SubmissionVerdict(_get_str(data, "outcome")),
-        )
-    if schema == "popperpad/market-verifier-statement/challenge/v1":
-        _require_exact_object_fields(
-            data,
-            frozenset(
-                {
-                    "schema",
-                    "pre_state_hash",
-                    "policy_hash",
-                    "bounty_id",
-                    "claim_ref",
-                    "context_ref",
-                    "challenge_id",
-                    "submission_id",
-                    "finding_kind",
-                    "evidence_refs",
-                    "outcome",
-                }
-            ),
-            "verifier_receipt.statement",
-        )
-        return ChallengeVerifierStatement(
-            pre_state_hash=_get_ref(data, "pre_state_hash"),
-            policy_hash=_get_ref(data, "policy_hash"),
-            bounty_id=_get_str(data, "bounty_id"),
-            claim_ref=_get_ref(data, "claim_ref"),
-            context_ref=_get_opt_ref(data, "context_ref"),
-            challenge_id=_get_str(data, "challenge_id"),
-            submission_id=_get_str(data, "submission_id"),
-            finding_kind=_get_str(data, "finding_kind"),
-            evidence_refs=_get_ref_tuple(data, "evidence_refs"),
-            outcome=ChallengeVerdict(_get_str(data, "outcome")),
-        )
-    raise ValueError("verifier_receipt.statement.schema is not supported")
-
-
-def _require_exact_object_fields(
-    data: FrozenDict[JsonValue],
-    expected: frozenset[str],
-    field_path: str,
-) -> None:
-    actual = frozenset(data)
-    unknown = sorted(actual - expected)
-    if unknown:
-        raise ValueError(f"{field_path} contains unknown fields: {unknown}")
-    missing = sorted(expected - actual)
-    if missing:
-        raise ValueError(f"{field_path} is missing required fields: {missing}")
-
-
-def _decode_canonical_hex(
-    data: FrozenDict[JsonValue],
-    key: str,
-    *,
-    byte_length: int,
-) -> bytes:
-    value = _get_str(data, key)
-    if len(value) != byte_length * 2 or value != value.lower():
-        raise ValueError(f"field {key!r} must be canonical lowercase hex")
-    try:
-        decoded = bytes.fromhex(value)
-    except ValueError as exc:
-        raise ValueError(f"field {key!r} must be canonical lowercase hex") from exc
-    if decoded.hex() != value:
-        raise ValueError(f"field {key!r} must be canonical lowercase hex")
-    return decoded
 
 # ---------------------------------------------------------------------------
 # JSON helper functions — strict, no silent normalization.
