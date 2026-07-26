@@ -507,9 +507,13 @@ def _check_phase_invariants(state: BountyState, out: list[MarketStateViolation])
 
 def _check_terminal_invariants(state: BountyState, out: list[MarketStateViolation]) -> None:
     terminal = state.phase in {BountyPhase.SETTLED, BountyPhase.EXPIRED, BountyPhase.CANCELED}
+    if state.phase is not BountyPhase.SETTLED and state.settlement_ref is not None:
+        out.append(_v(
+            MarketStateViolationCode.NON_SETTLED_HAS_SETTLEMENT,
+            "$.settlement_ref",
+            "non-settled state has settlement ref",
+        ))
     if not terminal:
-        if state.settlement_ref is not None:
-            out.append(_v(MarketStateViolationCode.NON_SETTLED_HAS_SETTLEMENT, "$.settlement_ref", "non-settled state has settlement ref"))
         return
     if any(value.bond_locked.atoms != 0 for value in state.submissions):
         out.append(_v(MarketStateViolationCode.TERMINAL_RETAINS_BOND, "$.submissions", "terminal state retains submission bond"))

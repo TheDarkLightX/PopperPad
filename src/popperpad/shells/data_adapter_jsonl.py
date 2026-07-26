@@ -433,6 +433,15 @@ def _invalid_input_bytes(
     return serialize_json(response.as_json())
 
 
+def _strip_jsonl_delimiter(line: bytes) -> bytes:
+    """Remove one LF delimiter and its optional preceding CR."""
+
+    if not line.endswith(b"\n"):
+        return line
+    payload = line[:-1]
+    return payload[:-1] if payload.endswith(b"\r") else payload
+
+
 def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
     """Run the JSONL shell: read lines from stdin, write responses to stdout."""
 
@@ -442,15 +451,15 @@ def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
         line = stdin.readline(MAX_REQUEST_BYTES + 2)
         if not line:
             break
-        if len(line) > MAX_REQUEST_BYTES and not line.endswith((b"\n", b"\r")):
+        if len(line) > MAX_REQUEST_BYTES and not line.endswith(b"\n"):
             digest = hashlib.sha256()
             digest.update(line)
             while True:
                 line = stdin.readline(MAX_REQUEST_BYTES + 2)
                 if not line:
                     break
-                if line.endswith((b"\n", b"\r")):
-                    digest.update(line.rstrip(b"\n\r"))
+                if line.endswith(b"\n"):
+                    digest.update(_strip_jsonl_delimiter(line))
                     break
                 digest.update(line)
             response_bytes = _invalid_input_bytes(
@@ -464,7 +473,7 @@ def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
             stdout.write(b"\n")
             stdout.flush()
             continue
-        payload = line.rstrip(b"\n\r")
+        payload = _strip_jsonl_delimiter(line)
         response_bytes = process_line(payload, profile, binding)
         stdout.write(response_bytes)
         stdout.write(b"\n")

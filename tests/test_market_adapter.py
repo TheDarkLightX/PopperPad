@@ -20,6 +20,7 @@ Tests verify:
 from __future__ import annotations
 
 import ast
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -803,6 +804,34 @@ def test_validate_state_invalid(binding) -> None:
     assert resp.reason_code == "INVALID_STATE"
 
 
+def test_validate_state_rejects_settlement_ref_outside_settled_phase(binding) -> None:
+    expired_with_settlement = freeze_json({
+        "phase": "expired", "escrow_atoms": 0,
+        "submission_status": "none", "submission_time_class": "none",
+        "bond_atoms": 0,
+        "challenge_status": "none", "challenge_opened_time_class": "none",
+        "deposit_atoms": 0, "payable": False, "settled": True,
+        "processed_command_mask": 0,
+    })
+    abstract = SingleSlotAbstractState.from_json(expired_with_settlement)
+    request = _make_request(
+        binding,
+        expired_with_settlement,
+        None,
+        operation=AdapterOperation.VALIDATE_STATE,
+        expected_pre_state_hash=abstract_state_hash(abstract),
+    )
+
+    response = apply_data_adapter(load_profile(), binding, request)
+
+    assert response.decision_kind is AdapterDecisionKind.REJECT
+    assert response.reason_code == "INVALID_STATE"
+    assert any(
+        violation["code"] == "non_settled_has_settlement"
+        for violation in response.state_violations
+    )
+
+
 # ---------------------------------------------------------------------------
 # INVALID_INPUT for out-of-domain abstract state.
 # ---------------------------------------------------------------------------
@@ -858,6 +887,24 @@ def test_market_state_violations_are_typed() -> None:
 def test_load_source_manifest_verifies_profile_hash(profile) -> None:
     manifest = load_source_manifest(profile)
     assert manifest.profile_hash == profile.hash()
+
+
+def test_load_source_manifest_rejects_tampered_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile,
+) -> None:
+    import popperpad.refinement.profiles.market_single_slot_v1 as profile_module
+
+    source = Path(profile_module.__file__).parent / "market_single_slot_v1.sources.json"
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw["schema"] = "popperpad/data-adapter-source-manifest/v0"
+    tampered = tmp_path / "market_single_slot_v1.sources.json"
+    tampered.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(profile_module, "_SOURCE_MANIFEST_PATH", tampered)
+
+    with pytest.raises(ValueError, match="SourceManifest.schema mismatch"):
+        profile_module.load_source_manifest(profile)
 
 
 def test_load_binding_verifies_hashes(profile) -> None:

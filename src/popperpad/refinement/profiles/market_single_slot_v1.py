@@ -27,7 +27,6 @@ from ...core.adapter_protocol import (
     ADAPTER_PROTOCOL_VERSION,
     BINDING_SCHEMA,
     PROFILE_SCHEMA,
-    SOURCE_MANIFEST_SCHEMA,
     AdapterBinding,
     DataAdapterProfile,
     SourceFileBinding,
@@ -79,7 +78,7 @@ def load_source_manifest(profile: DataAdapterProfile | None = None) -> SourceMan
         for f in raw["files"]
     )
     manifest = SourceManifest(
-        schema=SOURCE_MANIFEST_SCHEMA,
+        schema=raw["schema"],
         repository=raw["repository"],
         commit=raw["commit"],
         files=files,

@@ -353,3 +353,17 @@ def test_run_jsonl_shell_drains_oversized_line_and_recovers(profile, binding) ->
     ]
     assert responses[0]["input_bytes_hash"] == sha256_bytes(oversized)
     assert responses[1]["decision_kind"] == "accept"
+
+
+def test_run_jsonl_shell_drains_cr_at_chunk_boundary_as_one_record(profile, binding) -> None:
+    valid = _canonical_bytes(_canonical_request_dict(binding_hash=binding.hash()))
+    payload = b"x" * (MAX_REQUEST_BYTES + 1) + b"\r" + valid
+    stdin = io.BytesIO(payload + b"\n")
+    stdout = io.BytesIO()
+
+    run_jsonl_shell(stdin, stdout)
+
+    responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(responses) == 1
+    assert responses[0]["reason_code"] == "input_too_large"
+    assert responses[0]["input_bytes_hash"] == sha256_bytes(payload)
