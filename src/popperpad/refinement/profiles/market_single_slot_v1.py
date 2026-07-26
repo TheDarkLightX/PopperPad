@@ -56,6 +56,7 @@ def load_profile() -> DataAdapterProfile:
         semantic_profile=semantic,
         explicit_nonclaims=(
             "arbitrary_market_cardinality",
+            "bounded_test_verifier_key_not_for_deployment",
             "chain_or_token_refinement",
             "production_datastore_linearizability",
             "unbounded_liveness_or_fairness",

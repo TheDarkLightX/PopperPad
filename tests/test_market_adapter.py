@@ -42,7 +42,7 @@ from popperpad.core.adapter_protocol import (
     SourceFileBinding,
     SourceManifest,
 )
-from popperpad.core.codec import canonical_json_bytes, sha256_bytes
+from popperpad.core.codec import sha256_bytes
 from popperpad.core.market import (
     ChallengeVerifierStatement,
     ChallengeVerdict,
@@ -76,6 +76,8 @@ from popperpad.refinement.market_adapter import (
     project_state,
     parse_market_profile,
     abstract_state_hash,
+    command_json_with_verifier_receipt,
+    parse_verifier_receipt_value,
 )
 from popperpad.refinement.profiles.market_single_slot_v1 import (
     load_profile,
@@ -104,15 +106,15 @@ def market(profile):
     return parse_market_profile(profile.semantic_profile)
 
 
-_TEST_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+_TEST_VERIFIER_SEED = bytes(range(1, 33))
+_TEST_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(_TEST_VERIFIER_SEED)
 _TEST_PUBLIC_KEY = _TEST_PRIVATE_KEY.public_key().public_bytes(
     encoding=serialization.Encoding.Raw,
     format=serialization.PublicFormat.Raw,
 )
-_TEST_STATE_RECEIPT_REF = "sha256:" + "9" * 64
 
 
-def _model_receipt_provider(market, abstract, cmd) -> FrozenDict:
+def _model_receipt_value(market, abstract, cmd) -> FrozenDict:
     if ed25519_verifier_ref(_TEST_PUBLIC_KEY) != market.verifier_ref:
         raise AssertionError("model receipt key does not match bound profile")
     concrete = concretize_state(market, abstract)
@@ -179,8 +181,10 @@ def _authority_command(
     state: SingleSlotAbstractState,
     cmd: SingleSlotAbstractCommand,
 ) -> FrozenDict:
-    receipt = _model_receipt_provider(market, state, cmd)
-    return replace(cmd, verifier_receipt=receipt).as_json()
+    receipt = parse_verifier_receipt_value(
+        _model_receipt_value(market, state, cmd)
+    )
+    return command_json_with_verifier_receipt(cmd, receipt)
 
 
 def _make_request(
@@ -291,8 +295,6 @@ def test_abstract_state_is_finite_and_closed() -> None:
     assert state.challenge_status in AbstractChallengeStatus
     assert state.submission_time_class in TimeClassOrNone
     assert state.challenge_opened_time_class in TimeClassOrNone
-    assert state.submission_receipt_ref is None
-    assert state.challenge_receipt_ref is None
     assert 0 <= state.processed_command_mask < (1 << len(COMMAND_SLOTS))
 
 
@@ -302,10 +304,8 @@ def test_initial_state_is_draft_with_no_activity() -> None:
     assert state.escrow_atoms == 0
     assert state.submission_status is AbstractSubmissionStatus.NONE
     assert state.submission_time_class is TimeClassOrNone.NONE
-    assert state.submission_receipt_ref is None
     assert state.challenge_status is AbstractChallengeStatus.NONE
     assert state.challenge_opened_time_class is TimeClassOrNone.NONE
-    assert state.challenge_receipt_ref is None
     assert state.payable is False
     assert state.settled is False
     assert state.processed_command_mask == 0
@@ -321,11 +321,9 @@ def test_state_bounds_reject_escrow_exceeding_reward() -> None:
         escrow_atoms=9999,
         submission_status=AbstractSubmissionStatus.NONE,
         submission_time_class=TimeClassOrNone.NONE,
-        submission_receipt_ref=None,
         bond_atoms=0,
         challenge_status=AbstractChallengeStatus.NONE,
         challenge_opened_time_class=TimeClassOrNone.NONE,
-        challenge_receipt_ref=None,
         deposit_atoms=0,
         payable=False,
         settled=False,
@@ -341,11 +339,9 @@ def test_state_bounds_reject_bond_exceeding_profile() -> None:
         escrow_atoms=1000,
         submission_status=AbstractSubmissionStatus.PENDING,
         submission_time_class=TimeClassOrNone.PRE_DEADLINE,
-        submission_receipt_ref=None,
         bond_atoms=9999,
         challenge_status=AbstractChallengeStatus.NONE,
         challenge_opened_time_class=TimeClassOrNone.NONE,
-        challenge_receipt_ref=None,
         deposit_atoms=0,
         payable=False,
         settled=False,
@@ -361,11 +357,9 @@ def test_state_bounds_reject_deposit_exceeding_profile() -> None:
         escrow_atoms=1000,
         submission_status=AbstractSubmissionStatus.VERIFIED,
         submission_time_class=TimeClassOrNone.PRE_DEADLINE,
-        submission_receipt_ref=_TEST_STATE_RECEIPT_REF,
         bond_atoms=0,
         challenge_status=AbstractChallengeStatus.OPEN,
         challenge_opened_time_class=TimeClassOrNone.CHALLENGE_WINDOW,
-        challenge_receipt_ref=None,
         deposit_atoms=9999,
         payable=False,
         settled=False,
@@ -379,10 +373,8 @@ def test_adapter_rejects_state_with_unbounded_escrow(binding) -> None:
     bad_state = freeze_json({
         "phase": "open", "escrow_atoms": 9999,
         "submission_status": "none", "submission_time_class": "none",
-        "submission_receipt_ref": None,
         "bond_atoms": 0,
         "challenge_status": "none", "challenge_opened_time_class": "none",
-        "challenge_receipt_ref": None,
         "deposit_atoms": 0, "payable": False, "settled": False,
         "processed_command_mask": 0,
     })
@@ -402,11 +394,9 @@ def test_state_preserves_submission_time_class() -> None:
         escrow_atoms=1000,
         submission_status=AbstractSubmissionStatus.PENDING,
         submission_time_class=TimeClassOrNone.PRE_DEADLINE,
-        submission_receipt_ref=None,
         bond_atoms=100,
         challenge_status=AbstractChallengeStatus.NONE,
         challenge_opened_time_class=TimeClassOrNone.NONE,
-        challenge_receipt_ref=None,
         deposit_atoms=0,
         payable=False,
         settled=False,
@@ -421,11 +411,9 @@ def test_state_preserves_challenge_opened_time_class() -> None:
         escrow_atoms=1000,
         submission_status=AbstractSubmissionStatus.VERIFIED,
         submission_time_class=TimeClassOrNone.PRE_DEADLINE,
-        submission_receipt_ref=_TEST_STATE_RECEIPT_REF,
         bond_atoms=0,
         challenge_status=AbstractChallengeStatus.OPEN,
         challenge_opened_time_class=TimeClassOrNone.CHALLENGE_WINDOW,
-        challenge_receipt_ref=None,
         deposit_atoms=50,
         payable=False,
         settled=False,
@@ -441,11 +429,9 @@ def test_state_rejects_time_class_mismatch_with_existence() -> None:
             escrow_atoms=0,
             submission_status=AbstractSubmissionStatus.NONE,
             submission_time_class=TimeClassOrNone.PRE_DEADLINE,  # Wrong: none should be NONE
-            submission_receipt_ref=None,
             bond_atoms=0,
             challenge_status=AbstractChallengeStatus.NONE,
             challenge_opened_time_class=TimeClassOrNone.NONE,
-            challenge_receipt_ref=None,
             deposit_atoms=0,
             payable=False,
             settled=False,
@@ -604,17 +590,16 @@ def test_command_from_json_rejects_irrelevant_fields() -> None:
         SingleSlotAbstractCommand.from_json(bad_cmd)
 
 
-def test_command_rejects_receipt_on_non_authority_kind() -> None:
-    with pytest.raises(ValueError, match="verifier_receipt is not applicable"):
-        SingleSlotAbstractCommand(
-            kind=AbstractCommandKind.OPEN_BOUNTY,
-            verifier_receipt=FrozenDict(),
-        )
+def test_abstract_command_value_excludes_verifier_evidence() -> None:
+    command = SingleSlotAbstractCommand(kind=AbstractCommandKind.OPEN_BOUNTY)
+    assert not hasattr(command, "verifier_receipt")
 
 
-def test_command_from_json_rejects_inapplicable_null_receipt() -> None:
-    bad_cmd = freeze_json({"kind": "open_bounty", "verifier_receipt": None})
-    with pytest.raises(ValueError, match="verifier_receipt is not applicable"):
+def test_command_from_json_rejects_embedded_verifier_evidence() -> None:
+    bad_cmd = freeze_json(
+        {"kind": "verify_submission", "accepted": True, "verifier_receipt": {}}
+    )
+    with pytest.raises(ValueError, match="command contains unknown fields"):
         SingleSlotAbstractCommand.from_json(bad_cmd)
 
 
@@ -819,26 +804,19 @@ def test_full_lifecycle_via_adapter(binding, market) -> None:
     assert state.submission_time_class is TimeClassOrNone.PRE_DEADLINE
 
     # 3. Verify submission (accepted)
-    verify_command = _authority_command(
-        market,
-        state,
-        SingleSlotAbstractCommand(
-            kind=AbstractCommandKind.VERIFY_SUBMISSION,
-            accepted=True,
-        ),
-    )
-    receipt_json = verify_command["verifier_receipt"]
-    assert isinstance(receipt_json, FrozenDict)
-    expected_receipt_ref = sha256_bytes(canonical_json_bytes(receipt_json))
     resp = apply_data_adapter(load_profile(), binding, _make_request(binding, state.as_json(),
-        verify_command,
+        _authority_command(
+            market,
+            state,
+            SingleSlotAbstractCommand(
+                kind=AbstractCommandKind.VERIFY_SUBMISSION,
+                accepted=True,
+            ),
+        ),
         time_class="challenge_window", now_epoch_s=1050))
     assert resp.decision_kind is AdapterDecisionKind.ACCEPT
     state = SingleSlotAbstractState.from_json(resp.post_state)
     assert state.submission_status is AbstractSubmissionStatus.VERIFIED
-    assert state.submission_receipt_ref == expected_receipt_ref
-    assert resp.receipt is not None
-    assert market_state_hash(concretize_state(market, state)) == resp.receipt["state_hash"]
 
     # 4. Advance to payable
     resp = apply_data_adapter(load_profile(), binding, _make_request(binding, state.as_json(),
@@ -856,82 +834,6 @@ def test_full_lifecycle_via_adapter(binding, market) -> None:
     state = SingleSlotAbstractState.from_json(resp.post_state)
     assert state.phase is AbstractPhase.SETTLED
     assert state.escrow_atoms == 0
-
-
-def test_challenge_receipt_reference_survives_projection(profile, binding, market) -> None:
-    state = _pending_submission(profile, binding)
-
-    verify_command = _authority_command(
-        market,
-        state,
-        SingleSlotAbstractCommand(
-            kind=AbstractCommandKind.VERIFY_SUBMISSION,
-            accepted=True,
-        ),
-    )
-    verified = apply_data_adapter(
-        profile,
-        binding,
-        _make_request(
-            binding,
-            state.as_json(),
-            verify_command,
-            time_class="challenge_window",
-            now_epoch_s=1050,
-        ),
-    )
-    assert verified.decision_kind is AdapterDecisionKind.ACCEPT
-    state = SingleSlotAbstractState.from_json(verified.post_state)
-    submission_receipt_ref = state.submission_receipt_ref
-    assert submission_receipt_ref is not None
-
-    opened = apply_data_adapter(
-        profile,
-        binding,
-        _make_request(
-            binding,
-            state.as_json(),
-            freeze_json({"kind": "open_challenge"}),
-            time_class="challenge_window",
-            now_epoch_s=1050,
-        ),
-    )
-    assert opened.decision_kind is AdapterDecisionKind.ACCEPT
-    state = SingleSlotAbstractState.from_json(opened.post_state)
-    assert state.submission_receipt_ref == submission_receipt_ref
-    assert state.challenge_status is AbstractChallengeStatus.OPEN
-    assert state.challenge_receipt_ref is None
-
-    resolve_command = _authority_command(
-        market,
-        state,
-        SingleSlotAbstractCommand(
-            kind=AbstractCommandKind.RESOLVE_CHALLENGE,
-            upheld=False,
-        ),
-    )
-    receipt_json = resolve_command["verifier_receipt"]
-    assert isinstance(receipt_json, FrozenDict)
-    expected_receipt_ref = sha256_bytes(canonical_json_bytes(receipt_json))
-
-    resolved = apply_data_adapter(
-        profile,
-        binding,
-        _make_request(
-            binding,
-            state.as_json(),
-            resolve_command,
-            time_class="challenge_window",
-            now_epoch_s=1050,
-        ),
-    )
-    assert resolved.decision_kind is AdapterDecisionKind.COMMITTED_FAILURE
-    state = SingleSlotAbstractState.from_json(resolved.post_state)
-    assert state.challenge_status is AbstractChallengeStatus.REJECTED
-    assert state.challenge_receipt_ref == expected_receipt_ref
-    assert state.submission_receipt_ref == submission_receipt_ref
-    assert resolved.receipt is not None
-    assert market_state_hash(concretize_state(market, state)) == resolved.receipt["state_hash"]
 
 
 def test_committed_failure_is_distinct(binding, market) -> None:
@@ -1125,10 +1027,8 @@ def test_validate_state_invalid(binding) -> None:
     bad_state = freeze_json({
         "phase": "draft", "escrow_atoms": 999,
         "submission_status": "none", "submission_time_class": "none",
-        "submission_receipt_ref": None,
         "bond_atoms": 0,
         "challenge_status": "none", "challenge_opened_time_class": "none",
-        "challenge_receipt_ref": None,
         "deposit_atoms": 0, "payable": False, "settled": False,
         "processed_command_mask": 0,
     })
@@ -1146,10 +1046,8 @@ def test_validate_state_rejects_settlement_ref_outside_settled_phase(binding) ->
     expired_with_settlement = freeze_json({
         "phase": "expired", "escrow_atoms": 0,
         "submission_status": "none", "submission_time_class": "none",
-        "submission_receipt_ref": None,
         "bond_atoms": 0,
         "challenge_status": "none", "challenge_opened_time_class": "none",
-        "challenge_receipt_ref": None,
         "deposit_atoms": 0, "payable": False, "settled": True,
         "processed_command_mask": 0,
     })
@@ -1179,10 +1077,8 @@ def test_validate_state_rejects_settlement_ref_outside_settled_phase(binding) ->
 def test_invalid_state_out_of_domain(binding) -> None:
     bad_state = freeze_json({"phase": "nonexistent", "escrow_atoms": 0,
         "submission_status": "none", "submission_time_class": "none",
-        "submission_receipt_ref": None,
         "bond_atoms": 0,
         "challenge_status": "none", "challenge_opened_time_class": "none",
-        "challenge_receipt_ref": None,
         "deposit_atoms": 0, "payable": False, "settled": False,
         "processed_command_mask": 0})
     req = AdapterRequest(
@@ -1313,15 +1209,18 @@ def test_complete_enumeration_search_completes(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     assert result.search_complete is True
-    assert result.authority_evidence_complete is True
     assert result.budget_exhausted is False
     assert result.reachable_states > 0
     assert result.total_cases > 0
     assert result.accept_count > 0
     assert result.reject_count > 0
+    assert result.reject_reasons.get("MISSING_EVIDENCE", 0) == 0
+    assert result.reject_reasons.get("INVALID_EVIDENCE", 0) == 0
     assert type(result.reject_reasons) is FrozenDict
     with pytest.raises(TypeError):
         result.reject_reasons["mutated"] = 1
@@ -1331,43 +1230,36 @@ def test_enumeration_enforces_state_budget_per_successor(profile, binding) -> No
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result = enumerate_all_transitions(
-        profile, binding, max_states=3, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
+        max_states=3,
     )
 
     assert result.reachable_states == 3
     assert result.search_complete is False
-    assert result.authority_evidence_complete is True
     assert result.budget_exhausted is True
 
 
-def test_enumeration_without_authority_provider_is_not_complete(profile, binding) -> None:
+def test_enumeration_rejects_private_key_outside_profile(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
-    result = enumerate_all_transitions(profile, binding)
-
-    assert result.search_complete is False
-    assert result.authority_evidence_complete is False
-    assert result.budget_exhausted is False
-
-
-def test_enumeration_rejects_inadmissible_authority_provider(profile, binding) -> None:
-    from popperpad.refinement.enumerator import enumerate_all_transitions
-
-    def invalid_provider(market, state, command):
-        receipt = thaw_json(_model_receipt_provider(market, state, command))
-        receipt["signature_hex"] = "00" * 64
-        invalid = freeze_json(receipt)
-        assert isinstance(invalid, FrozenDict)
-        return invalid
-
-    with pytest.raises(
-        RuntimeError,
-        match="receipt_provider produced inadmissible verifier evidence",
-    ):
+    with pytest.raises(ValueError, match="does not match"):
         enumerate_all_transitions(
             profile,
             binding,
-            receipt_provider=invalid_provider,
+            verifier_private_key=b"\x09" * 32,
+        )
+
+
+def test_enumeration_requires_exact_private_key_bytes(profile, binding) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    with pytest.raises(ValueError, match="exactly 32 bytes"):
+        enumerate_all_transitions(
+            profile,
+            binding,
+            verifier_private_key=b"short",
         )
 
 
@@ -1380,17 +1272,26 @@ def test_enumeration_rejects_invalid_state_budgets(
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     with pytest.raises(ValueError, match="max_states must be a positive integer"):
-        enumerate_all_transitions(profile, binding, max_states=max_states)
+        enumerate_all_transitions(
+            profile,
+            binding,
+            verifier_private_key=_TEST_VERIFIER_SEED,
+            max_states=max_states,
+        )
 
 
 def test_enumeration_corpus_hash_is_deterministic(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result1 = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     result2 = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     assert result1.corpus_hash == result2.corpus_hash
 
@@ -1399,7 +1300,9 @@ def test_enumeration_covers_all_command_variants(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
     result = enumerate_all_transitions(
-        profile, binding, receipt_provider=_model_receipt_provider,
+        profile,
+        binding,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
     assert result.command_variants == 10
     assert result.time_classes == 5
@@ -1425,7 +1328,7 @@ def test_enumeration_uses_supplied_profile_time_representatives(profile, binding
     result = enumerate_all_transitions(
         shifted_profile,
         shifted_binding,
-        receipt_provider=_model_receipt_provider,
+        verifier_private_key=_TEST_VERIFIER_SEED,
     )
 
     assert result.search_complete is True

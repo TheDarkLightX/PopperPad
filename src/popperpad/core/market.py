@@ -1183,7 +1183,7 @@ def _find_verifier_receipt(
     return None
 
 
-def _expected_submission_verifier_statement(
+def submission_verifier_statement(
     state: BountyState,
     command: VerifySubmission,
     policy: MarketPolicy,
@@ -1207,7 +1207,7 @@ def _expected_submission_verifier_statement(
     )
 
 
-def _expected_challenge_verifier_statement(
+def challenge_verifier_statement(
     state: BountyState,
     command: ResolveChallenge,
     policy: MarketPolicy,
@@ -1264,7 +1264,7 @@ def _validate_command_evidence_binding(
                 "statement is not bound to the current state, policy, command, and outcome",
             )
         submission = _submission(state, command.submission_id)
-        if submission is not None and statement != _expected_submission_verifier_statement(
+        if submission is not None and statement != submission_verifier_statement(
             state, command, policy, submission
         ):
             return _reject(
@@ -1310,7 +1310,7 @@ def _validate_command_evidence_binding(
                 "statement is not bound to the current state, policy, command, and outcome",
             )
         challenge = _challenge(state, command.challenge_id)
-        if challenge is not None and statement != _expected_challenge_verifier_statement(
+        if challenge is not None and statement != challenge_verifier_statement(
             state, command, policy, challenge
         ):
             return _reject(
@@ -1370,7 +1370,7 @@ def _admit_submission_receipt(
         verifier_ref = ed25519_verifier_ref(receipt.public_key)
     except ValueError as exc:
         return _reject("INVALID_EVIDENCE", "verifier_public_key", str(exc))
-    expected = _expected_submission_verifier_statement(
+    expected = submission_verifier_statement(
         state, command, policy, submission
     )
     if receipt.statement != expected:
@@ -1409,7 +1409,7 @@ def _admit_challenge_receipt(
         verifier_ref = ed25519_verifier_ref(receipt.public_key)
     except ValueError as exc:
         return _reject("INVALID_EVIDENCE", "verifier_public_key", str(exc))
-    expected = _expected_challenge_verifier_statement(
+    expected = challenge_verifier_statement(
         state, command, policy, challenge
     )
     if receipt.statement != expected:

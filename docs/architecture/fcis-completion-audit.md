@@ -1,11 +1,11 @@
 # FCIS Completion Audit
 
-Status: completed repair audit for the bounded market adapter.
+Status: completed local repair audit for the bounded market adapter; hosted promotion is pending.
 
 Review endpoints:
 
 - base: `a297f376323808dc5acbc1e47d50bc607531c15e`
-- bound source revision: `ee8d247e7f446eace45c7ee69e63b33e3b53abeb`
+- bound source revision: `55033f82daf4c65ee2716dbb07d4610e704713da`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -95,12 +95,15 @@ authority boundary without further core mutation.
 13. Finite enumeration enforces `max_states` before admitting each new
     successor, so the advertised bound cannot be exceeded by one branching
     expansion.
-14. Verifier-authority commands accept one exact caller-supplied Ed25519
-    receipt, derive its content reference from canonical bytes, and pass the
-    immutable evidence to the market core for signature and statement checks.
-15. Enumeration binds receipt-bearing commands into request and corpus hashes,
-    refuses `search_complete` without an external receipt provider, and aborts
-    if that provider supplies missing or inadmissible evidence.
+14. Verifier-authority requests accept one exact caller-supplied Ed25519
+    receipt in a separate immutable evidence envelope, derive its content
+    reference from canonical bytes, and pass it to the market core for
+    signature and exact-statement checks. The finite abstract command does not
+    retain the receipt payload.
+15. Enumeration derives deterministic mounted-model receipts from an explicit
+    caller-supplied 32-byte Ed25519 fixture key, rejects keys outside the bound
+    profile, and binds each receipt-bearing request into the corpus hash. No
+    live receipt-provider callback participates in the search.
 16. The source manifest binds the Ed25519 verifier implementation used by the
     market core, so signature-admission changes alter the binding hash.
 17. Oversized-record hashing preserves a pending trailing CR across chunks and
@@ -111,9 +114,10 @@ authority boundary without further core mutation.
     persistent JSONL shell.
 19. The packaged shell exposes a module entry point over binary standard
     streams, making the audited adapter usable from an installed wheel.
-20. Submission and challenge projections preserve admitted receipt references
-    as fixed-width finite state dimensions, so concretization retains the
-    authority receipt's exact committed concrete state.
+20. Abstract state and command values retain only the profile-bounded
+    semantic dimensions explored by the BFS. Authority evidence and concrete
+    receipt identities stay outside that finite quotient; concretization uses
+    the profile's declared model references.
 21. Canonical JSON Unicode encoding failures become committed typed boundary
     responses, so lone surrogate escapes cannot terminate the persistent shell.
 
@@ -128,9 +132,9 @@ authority boundary without further core mutation.
   commitments, and oversized-line recovery.
 - Profile-shift, state-budget, and malformed-collection regressions cover
   enumeration inputs, resource bounds, and total-transition behavior.
-- Missing-receipt, tampered-signature, unknown-field, provider-free, and
-  invalid-provider regressions cover the verifier authority boundary and honest
-  finite-search completeness.
+- Missing-receipt, tampered-signature, unknown-field, embedded-evidence,
+  wrong-key, and malformed-key regressions cover the verifier authority
+  boundary and honest finite-search completeness.
 - Terminal-state, chunk-boundary, and manifest-schema regressions cover the
   final fail-closed integrity cases.
 - A split-CRLF chunk-edge regression proves the oversized input hash excludes
@@ -139,26 +143,28 @@ authority boundary without further core mutation.
   committed to the input bytes and the following JSONL request still executes.
 - A subprocess regression launches the documented module entry point, supplies
   a request over stdin, and validates its committed stdout response.
-- Sequential submission and challenge authority regressions prove projected
-  receipt references and reconstructed concrete state hashes remain exact.
+- Submission acceptance, committed verifier failure, and exhaustive bounded
+  search regressions cover both authority outcomes without expanding abstract
+  state or command values with receipt payloads or arbitrary receipt refs.
 - A lone-surrogate regression proves unencodable JSON is committed to its input
   bytes and the following JSONL request still executes.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 433 tests.
+- The complete local Python suite passes: 432 tests.
 - Rust formatting and strict clippy pass; all 14 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the
   pre-request boundary schema without request identity.
-- GitHub CI passes on Python 3.10, Python 3.12, and the Rust kernel for the
-  reviewed implementation head.
+- GitHub CI on Python 3.10, Python 3.12, and the Rust kernel must pass on
+  this rebound head before merge.
 
 ## Explicit nonclaims
 
 This bounded refinement does not establish arbitrary-cardinality market
 correctness, unbounded liveness or fairness, verifier semantic correctness,
 hostile-recipe sandboxing, authenticated federation, datastore
-linearizability, blockchain refinement, or release readiness for public
-untrusted workloads. Those remain separate promotion gates.
+linearizability, blockchain refinement, exact concrete receipt-reference
+trace preservation across the finite abstraction, or release readiness for
+public untrusted workloads. Those remain separate promotion gates.
 
 The packaged single-slot profile's accepted verifier reference is a public
 model fixture. Its private key appears only in regression tests and supplies no
