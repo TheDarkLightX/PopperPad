@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `a297f376323808dc5acbc1e47d50bc607531c15e`
-- bound source revision: `3876607550d1f5fd6d863987204f424174a72ac7`
+- bound source revision: `d09def976b20af56d69789ac9b28c4228db8f217`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -111,6 +111,9 @@ authority boundary without further core mutation.
     persistent JSONL shell.
 19. The packaged shell exposes a module entry point over binary standard
     streams, making the audited adapter usable from an installed wheel.
+20. Submission and challenge projections preserve admitted receipt references
+    as fixed-width finite state dimensions, so concretization retains the
+    authority receipt's exact committed concrete state.
 
 ## Completed evidence
 
@@ -134,8 +137,10 @@ authority boundary without further core mutation.
   committed to the input bytes and the following JSONL request still executes.
 - A subprocess regression launches the documented module entry point, supplies
   a request over stdin, and validates its committed stdout response.
+- Sequential submission and challenge authority regressions prove projected
+  receipt references and reconstructed concrete state hashes remain exact.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 431 tests.
+- The complete local Python suite passes: 432 tests.
 - Rust formatting and strict clippy pass; all 14 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the
