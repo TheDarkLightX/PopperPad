@@ -170,6 +170,13 @@ def enumerate_all_transitions(
                     expected_pre_state_hash=state_hash,
                 )
                 response = apply_data_adapter(profile, binding, request)
+                if statement is not None and response.reason_code in (
+                    "INVALID_EVIDENCE",
+                    "MISSING_EVIDENCE",
+                ):
+                    raise RuntimeError(
+                        "generated verifier evidence was not admitted"
+                    )
 
                 # Build complete corpus entry binding all transition data
                 entry = freeze_json({

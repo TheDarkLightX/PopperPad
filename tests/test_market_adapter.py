@@ -1219,6 +1219,8 @@ def test_complete_enumeration_search_completes(profile, binding) -> None:
     assert result.total_cases > 0
     assert result.accept_count > 0
     assert result.reject_count > 0
+    assert result.reject_reasons.get("MISSING_EVIDENCE", 0) == 0
+    assert result.reject_reasons.get("INVALID_EVIDENCE", 0) == 0
     assert type(result.reject_reasons) is FrozenDict
     with pytest.raises(TypeError):
         result.reject_reasons["mutated"] = 1
