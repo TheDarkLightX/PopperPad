@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from .canonical import canonical_json_bytes, stable_sha256
-from .core.commit import CommitBundle, validate_commit_bundle, validate_commit_record
+from .core.commit import (
+    CommitBundle,
+    logical_authority_scope,
+    validate_commit_bundle,
+    validate_commit_record,
+)
 from .core.result import Reject
 from .core.values import thaw_json
 from .refs import REF_RE, ValidationError, require
@@ -65,10 +70,13 @@ def _read_last_nonempty_line(path: Path) -> str:
 def _logical_commit_records(record: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
     created_at = str(record.get("created_at", ""))
     commit_hash = str(record.get("record_hash", ""))
+    receipt = record.get("receipt")
+    policy_version = receipt.get("policy_version") if isinstance(receipt, Mapping) else None
+    authority_scope = logical_authority_scope(policy_version)
     for item in record.get("objects", ()) or ():
         if not isinstance(item, Mapping):
             continue
-        yield {
+        fields = {
             "schema": _LOG_SCHEMA_V1,
             "op": "add_object",
             "created_at": created_at,
@@ -76,6 +84,9 @@ def _logical_commit_records(record: Mapping[str, Any]) -> Iterator[Mapping[str, 
             "obj_schema": str(item.get("schema", "")),
             "commit_record_hash": commit_hash,
         }
+        if authority_scope is not None:
+            fields["authority_scope"] = authority_scope
+        yield fields
     for item in record.get("blobs", ()) or ():
         if not isinstance(item, Mapping):
             continue

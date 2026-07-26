@@ -34,6 +34,7 @@ CORE_MODULES = (
     "popperpad.core.commit",
     "popperpad.core.evidence",
     "popperpad.core.graph",
+    "popperpad.core.imports",
     "popperpad.core.market",
     "popperpad.core.market_invariants",
     "popperpad.core.mechanism",
@@ -42,6 +43,7 @@ CORE_MODULES = (
     "popperpad.core.result",
     "popperpad.core.values",
     "popperpad.core.verifier",
+    "popperpad.core.verifier_receipts",
 )
 FORBIDDEN_ROOT_IMPORTS = {
     "asyncio",

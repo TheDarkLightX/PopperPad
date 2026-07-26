@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..core.imports import TrustPolicy
 from ..core.values import FrozenDict, JsonValue, freeze_json, thaw_json
 
 
@@ -132,20 +133,6 @@ class ImportReport:
         object.__setattr__(self, "imported_blob_refs", tuple(self.imported_blob_refs))
         object.__setattr__(self, "skipped_refs", tuple(self.skipped_refs))
         object.__setattr__(self, "checks", tuple(self.checks))
-
-
-@dataclass(frozen=True, slots=True)
-class TrustPolicy:
-    """Immutable local trust policy applied when importing bundles."""
-
-    require_signatures: bool = True
-    require_bundle_root_match: bool = True
-    accept_adapters: tuple[str, ...] = ()
-    require_anchors: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "accept_adapters", tuple(self.accept_adapters))
-        object.__setattr__(self, "require_anchors", tuple(self.require_anchors))
 
 
 @dataclass(frozen=True, slots=True)

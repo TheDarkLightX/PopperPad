@@ -16,6 +16,7 @@ SCHEMA_MARKET_RESOURCE_BUDGET_V1 = "popperpad/market/resource-budget/v1"
 SCHEMA_GAMIFICATION_SCORE_EVENT_V1 = "popperpad/gamification/score-event/v1"
 SCHEMA_GAMIFICATION_QUEST_V1 = "popperpad/gamification/quest/v1"
 SCHEMA_TRUTH_CERTIFICATE_V1 = "popperpad/certificate/truth/v1"
+SCHEMA_VERIFIER_RECEIPT_V1 = "popperpad/verifier-receipt/v1"
 
 LOG_SCHEMA_V1 = "popperpad/log_record/v1"
 

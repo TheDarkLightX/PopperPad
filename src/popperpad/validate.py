@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Mapping
+from .core.result import Reject
+from .core.verifier_receipts import parse_verifier_receipt_object
 
 from .refs import ValidationError, is_ref, require, require_list, require_ref, require_str
 from .schemas import (
@@ -17,6 +19,7 @@ from .schemas import (
     SCHEMA_MARKET_WORK_ORDER_V1,
     SCHEMA_RECIPE_V1,
     SCHEMA_TRUTH_CERTIFICATE_V1,
+    SCHEMA_VERIFIER_RECEIPT_V1,
 )
 
 import re
@@ -386,6 +389,14 @@ def _validate_truth_certificate(obj: Mapping[str, Any]) -> None:
         "truth certificate truth_boundary must be verifier_checked_certificate",
     )
 
+def _validate_verifier_receipt(obj: Mapping[str, Any]) -> None:
+    parsed = parse_verifier_receipt_object(obj)
+    require(
+        not isinstance(parsed, Reject),
+        f"invalid verifier receipt: {parsed.code if isinstance(parsed, Reject) else ''}",
+    )
+
+
 
 def _validate_market_work_order(obj: Mapping[str, Any]) -> None:
     task_type = obj.get("task_type")
@@ -590,6 +601,7 @@ VALIDATORS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     SCHEMA_CHECKPOINT_V1: _validate_checkpoint,
     SCHEMA_TRUTH_CERTIFICATE_V1: _validate_truth_certificate,
     SCHEMA_MARKET_WORK_ORDER_V1: _validate_market_work_order,
+    SCHEMA_VERIFIER_RECEIPT_V1: _validate_verifier_receipt,
     SCHEMA_MARKET_RESOURCE_BUDGET_V1: _validate_market_resource_budget,
     SCHEMA_GAMIFICATION_SCORE_EVENT_V1: _validate_score_event,
     SCHEMA_GAMIFICATION_QUEST_V1: _validate_quest,

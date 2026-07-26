@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 
 from popperpad.adapters.bundle import Bundle, Manifest, build_manifest, bundle_root, export_bundle, load_bundle_dir
-from popperpad.canonical import canonical_json_bytes, stable_sha256
+from popperpad.canonical import canonical_hash, canonical_json_bytes
 from popperpad.refs import Ref
+from popperpad.core.values import is_deeply_immutable
 
 
 def _ref(seed: str) -> Ref:
@@ -34,7 +35,7 @@ def test_manifest_root_hash_is_deterministic_and_content_bound() -> None:
         previous_bundle_refs=(),
     )
     manifest = build_manifest(bundle)
-    assert manifest.root_hash == stable_sha256({
+    assert manifest.root_hash == canonical_hash("bundle-content/v1", {
         "object_refs": [str(a), str(b)],
         "blob_refs": [],
         "entry_refs": [str(a)],
@@ -54,11 +55,19 @@ def test_manifest_root_hash_is_deterministic_and_content_bound() -> None:
 def test_bundle_root_is_canonical_hash_of_manifest() -> None:
     bundle = Bundle(bundle_id="ex", object_refs=(_ref("a"),), blob_refs=(), entry_refs=(), previous_bundle_refs=())
     manifest = build_manifest(bundle)
-    assert bundle_root(manifest) == stable_sha256(manifest.as_dict())
+    assert bundle_root(manifest) == canonical_hash(
+        "bundle-manifest/v1",
+        manifest.as_dict(),
+    )
 
 
 def test_bundle_and_manifest_own_nested_metadata() -> None:
-    signature = {"proof": {"path": ["root", "leaf"]}}
+    signature = {
+        "algorithm": "ed25519",
+        "key_id": "sha256:" + "c" * 64,
+        "signature_hex": "ab" * 64,
+    }
+    storage_hint = {"adapter": "local", "proof": {"path": ["root", "leaf"]}}
     producer = {"name": "builder", "versions": [1, 2]}
     bundle = Bundle(
         bundle_id="owned",
@@ -66,18 +75,26 @@ def test_bundle_and_manifest_own_nested_metadata() -> None:
         blob_refs=(),
         entry_refs=(),
         signatures=(signature,),
+        storage_hints=(storage_hint,),
     )
     manifest = build_manifest(bundle, producer=producer)
     expected = deepcopy(manifest.as_dict())
     expected_root = bundle_root(manifest)
 
-    signature["proof"]["path"].append("mutated")
+    signature["signature_hex"] = "00" * 64
+    storage_hint["proof"]["path"].append("mutated")
     producer["versions"].append(3)
 
     assert manifest.as_dict() == expected
     assert bundle_root(manifest) == expected_root
+    assert is_deeply_immutable(bundle)
+    assert is_deeply_immutable(manifest)
+    assert not hasattr(bundle, "__dict__")
+    assert not hasattr(manifest, "__dict__")
     with pytest.raises(TypeError):
         manifest.producer["name"] = "mutated"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        manifest.storage_hints[0]["adapter"] = "mutated"  # type: ignore[index]
 
 
 def test_export_and_load_round_trip(tmp_path: Path) -> None:
@@ -112,3 +129,7 @@ def test_export_and_load_round_trip(tmp_path: Path) -> None:
     assert loaded.manifest.root_hash == manifest.root_hash
     assert loaded.objects[str(obj_ref)] == obj_bytes
     assert loaded.blobs[str(blob_ref)] == blob
+    assert is_deeply_immutable(loaded)
+    assert not hasattr(loaded, "__dict__")
+    with pytest.raises(TypeError):
+        loaded.objects[str(obj_ref)] = b"mutated"  # type: ignore[index]

@@ -16,7 +16,7 @@ from popperpad.adapters import (
     bundle_root,
 )
 from popperpad.adapters.flow import gather_from_pad, import_bundle, prepare, verify_bundle
-from popperpad.adapters.bundle import export_bundle
+from popperpad.adapters.bundle import Manifest, export_bundle
 from popperpad.canonical import canonical_json_bytes, sha256_bytes
 from popperpad.pad import PopperPad
 from popperpad.refs import Ref
@@ -29,6 +29,13 @@ def _pad_with_domain(tmp_path: Path) -> tuple[PopperPad, str]:
     obj = {"schema": SCHEMA_DOMAIN_V1, "domain_id": "A", "name": "A", "tags": []}
     obj_ref = pad.put_object(obj).obj_ref
     return pad, obj_ref
+
+
+def _unsigned_policy(manifest: Manifest) -> TrustPolicy:
+    return TrustPolicy(
+        require_signatures=False,
+        expected_bundle_root=bundle_root(manifest),
+    )
 
 
 def test_gather_prepare_export_publish_anchor_round_trip(tmp_path: Path) -> None:
@@ -73,7 +80,7 @@ def test_import_rejects_bundle_with_wrong_root(tmp_path: Path) -> None:
 
     target = PopperPad(root=tmp_path / "imported")
     target.init()
-    report = import_bundle(bundle_dir, target, TrustPolicy(require_signatures=False))
+    report = import_bundle(bundle_dir, target, _unsigned_policy(manifest))
     assert report.status == "rejected"
 
 
@@ -86,7 +93,7 @@ def test_import_round_trip_into_new_pad(tmp_path: Path) -> None:
 
     target = PopperPad(root=tmp_path / "imported")
     target.init()
-    report = import_bundle(bundle_dir, target, TrustPolicy(require_signatures=False))
+    report = import_bundle(bundle_dir, target, _unsigned_policy(manifest))
     assert report.status == "imported"
     assert obj_ref in report.imported_object_refs
     assert target.get_object(obj_ref)["domain_id"] == "A"
@@ -118,7 +125,7 @@ def test_import_preserves_legacy_float_object_in_one_atomic_record(tmp_path: Pat
         previous_bundle_refs=(),
     )
     bundle_dir = tmp_path / "legacy-bundle"
-    export_bundle(
+    manifest = export_bundle(
         bundle,
         bundle_dir,
         objects={obj_ref: payload},
@@ -128,7 +135,7 @@ def test_import_preserves_legacy_float_object_in_one_atomic_record(tmp_path: Pat
 
     target = PopperPad(root=tmp_path / "legacy-target")
     target.init()
-    report = import_bundle(bundle_dir, target, TrustPolicy(require_signatures=False))
+    report = import_bundle(bundle_dir, target, _unsigned_policy(manifest))
     assert report.status == "imported"
     assert report.imported_object_refs == (obj_ref,)
     assert target.get_object(obj_ref) == legacy

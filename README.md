@@ -9,8 +9,11 @@ counterexamples, artifacts, and typed relationships between claims.
 > Recipe execution currently invokes host subprocesses and is not an operating-system
 > sandbox. A temporary working directory does not prevent filesystem access, network
 > access, environment-secret access, or uncontrolled child processes. Do not execute
-> untrusted third-party recipes. Remote signatures, hostile bundle import, automated
-> bounty settlement, and trustless federation are not production security boundaries yet.
+> untrusted third-party recipes. Hostile bundle import is fail-closed for canonical
+> decoding, hash and signature authentication, verifier-receipt policy, truth quarantine,
+> and atomic publication. Deployments must still supply and govern their own trusted keys,
+> verified adapter provenance, anchor-finality policy, and availability infrastructure.
+> Automated bounty settlement is not a production security boundary yet.
 
 It is designed to be:
 - **Offline-first**: local directory, no services required.
@@ -83,6 +86,8 @@ Design specs:
 - [Blockchain anchor adapter](docs/blockchain-anchor-spec.md)
 - [Chain adapter matrix](docs/chain-adapter-matrix.md)
 - [Tau Net adapter](docs/tau-net-adapter-spec.md)
+- [Strict FCIS architecture](docs/architecture/strict-fcis.md)
+- [Hostile bundle import FCIS boundary](docs/architecture/hostile-import-fcis.md)
 
 ## Recipe capabilities (v1)
 

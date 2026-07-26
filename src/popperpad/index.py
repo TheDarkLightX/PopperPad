@@ -37,7 +37,9 @@ class PadIndex:
         r = str(ref)
         self._schema_to_refs.setdefault(str(schema), set()).add(r)
         if schema == "popperpad/edge/v1":
-            self._edge_refs.add(r)
+            authority_scope = record.get("authority_scope")
+            if authority_scope != "import_quarantined":
+                self._edge_refs.add(r)
             self._edge_targets = None
             self._semantic_adj = None
 
