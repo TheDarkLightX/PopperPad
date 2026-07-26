@@ -114,7 +114,7 @@ _TEST_PUBLIC_KEY = _TEST_PRIVATE_KEY.public_key().public_bytes(
 )
 
 
-def _model_receipt_provider(market, abstract, cmd) -> FrozenDict:
+def _model_receipt_value(market, abstract, cmd) -> FrozenDict:
     if ed25519_verifier_ref(_TEST_PUBLIC_KEY) != market.verifier_ref:
         raise AssertionError("model receipt key does not match bound profile")
     concrete = concretize_state(market, abstract)
@@ -182,7 +182,7 @@ def _authority_command(
     cmd: SingleSlotAbstractCommand,
 ) -> FrozenDict:
     receipt = parse_verifier_receipt_value(
-        _model_receipt_provider(market, state, cmd)
+        _model_receipt_value(market, state, cmd)
     )
     return command_json_with_verifier_receipt(cmd, receipt)
 
