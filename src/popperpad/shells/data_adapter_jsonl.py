@@ -155,6 +155,11 @@ def parse_canonical_json(data: bytes) -> object:
     # we compare against the canonical form without the trailing newline.
     try:
         canonical = canonical_json_bytes(value).rstrip(b"\n")
+    except UnicodeEncodeError as exc:
+        raise StrictJSONParseError(
+            InvalidInputCode.NON_CANONICAL_JSON,
+            f"value is outside canonical unicode JSON: {exc}",
+        ) from exc
     except (TypeError, ValueError) as exc:
         raise StrictJSONParseError(
             InvalidInputCode.FLOAT_NOT_ALLOWED,

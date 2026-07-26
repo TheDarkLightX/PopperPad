@@ -369,6 +369,21 @@ def test_run_jsonl_shell_recovers_after_integer_decoder_failure(profile, binding
     assert responses[1]["decision_kind"] == "accept"
 
 
+def test_run_jsonl_shell_recovers_after_unencodable_string(profile, binding) -> None:
+    invalid = b'{"x":"\\ud800"}'
+    valid = _canonical_bytes(_canonical_request_dict(binding_hash=binding.hash()))
+    stdin = io.BytesIO(invalid + b"\n" + valid + b"\n")
+    stdout = io.BytesIO()
+
+    run_jsonl_shell(stdin, stdout)
+
+    responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(responses) == 2
+    assert responses[0]["reason_code"] == "non_canonical_json"
+    assert responses[0]["input_bytes_hash"] == sha256_bytes(invalid)
+    assert responses[1]["decision_kind"] == "accept"
+
+
 def test_run_jsonl_shell_returns_boundary_failure_for_blank_record(profile, binding) -> None:
     stdin = io.BytesIO(b"\n")
     stdout = io.BytesIO()
