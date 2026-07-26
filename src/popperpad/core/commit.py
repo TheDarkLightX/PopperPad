@@ -15,6 +15,18 @@ _RECEIPT_V1 = "popperpad/receipt/v1"
 _RECEIPT_V2 = "popperpad/receipt/v2"
 
 
+def logical_authority_scope(policy_version: object) -> str | None:
+    """Project committed import policy into graph authority provenance."""
+
+    if type(policy_version) is not str or not policy_version.startswith(
+        "popperpad-import-policy/"
+    ):
+        return None
+    if policy_version.startswith("popperpad-import-policy/v2/trusted-receipt/"):
+        return "import_trusted_receipt"
+    return "import_quarantined"
+
+
 @dataclass(frozen=True, slots=True)
 class ObjectWrite(DeeplyImmutable):
     ref: str
@@ -131,17 +143,19 @@ class CommitBundle(DeeplyImmutable):
 
     def logical_records(self) -> tuple[FrozenDict[JsonValue], ...]:
         rows: list[FrozenDict[JsonValue]] = []
+        authority_scope = logical_authority_scope(self.receipt.policy_version)
         for item in self.objects:
-            row = freeze_json(
-                {
-                    "schema": "popperpad/log_record/v1",
-                    "op": "add_object",
-                    "created_at": self.record["created_at"],
-                    "obj_ref": item.ref,
-                    "obj_schema": item.schema,
-                    "commit_record_hash": self.record_hash,
-                }
-            )
+            fields: dict[str, JsonValue] = {
+                "schema": "popperpad/log_record/v1",
+                "op": "add_object",
+                "created_at": self.record["created_at"],
+                "obj_ref": item.ref,
+                "obj_schema": item.schema,
+                "commit_record_hash": self.record_hash,
+            }
+            if authority_scope is not None:
+                fields["authority_scope"] = authority_scope
+            row = freeze_json(fields)
             assert isinstance(row, FrozenDict)
             rows.append(row)
         for item in self.blobs:

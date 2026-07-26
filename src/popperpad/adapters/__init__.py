@@ -11,7 +11,24 @@ from .base import (
     VerificationCheck,
     VerificationReport,
 )
-from .bundle import Bundle, Manifest, build_manifest, bundle_root, export_bundle, load_bundle_dir
+from ..core.imports import (
+    ImportTruthMode,
+    SignatureAlgorithm,
+    TrustedSigner,
+    VerifiedImportProvenance,
+    bundle_signer_ref,
+)
+from ..core.verifier_receipts import TrustedVerifierV1, verifier_key_ref
+from .bundle import (
+    Bundle,
+    Manifest,
+    build_manifest,
+    bundle_content_root,
+    bundle_root,
+    export_bundle,
+    load_bundle_dir,
+    unsigned_bundle_root,
+)
 from .chain import EVM_FAMILIES, ChainFamily, EvmAnchorAdapter, EvmClient
 from .flow import gather_from_pad, import_bundle, prepare, verify_bundle
 from .ipfs import IpfsClient, IpfsStorageAdapter
@@ -29,6 +46,7 @@ __all__ = [
     "EvmAnchorAdapter",
     "EvmClient",
     "ImportReport",
+    "ImportTruthMode",
     "IpfsClient",
     "IpfsStorageAdapter",
     "LocalAnchorAdapter",
@@ -37,15 +55,21 @@ __all__ = [
     "PreparedBundle",
     "RegistryEntry",
     "AdapterRegistry",
+    "SignatureAlgorithm",
     "StorageReceipt",
     "TauNetAnchorAdapter",
     "TauPolicyInputs",
     "TauPolicyOutputs",
     "TrustPolicy",
+    "TrustedSigner",
+    "TrustedVerifierV1",
+    "VerifiedImportProvenance",
     "VerificationCheck",
     "VerificationReport",
     "build_manifest",
+    "bundle_content_root",
     "bundle_root",
+    "bundle_signer_ref",
     "default_registry",
     "evaluate_tau_policy",
     "export_bundle",
@@ -53,5 +77,7 @@ __all__ = [
     "import_bundle",
     "load_bundle_dir",
     "prepare",
+    "unsigned_bundle_root",
+    "verifier_key_ref",
     "verify_bundle",
 ]

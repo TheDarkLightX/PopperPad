@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "popperpad/verifier-receipt/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "receipt_root",
+    "algorithm",
+    "signer_key_id",
+    "signature_hex",
+    "statement"
+  ],
+  "properties": {
+    "schema": { "const": "popperpad/verifier-receipt/v1" },
+    "receipt_root": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "algorithm": { "const": "ed25519" },
+    "signer_key_id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "signature_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    },
+    "statement": {
+      "type": "object",
+      "required": [
+        "schema",
+        "claim_ref",
+        "context_ref",
+        "recipe_ref",
+        "evidence_ref",
+        "edge_ref",
+        "input_roots",
+        "verifier_id",
+        "verifier_version",
+        "result",
+        "output_roots",
+        "policy_hash",
+        "toolchain_hash"
+      ],
+      "properties": {
+        "schema": { "const": "popperpad/verifier-statement/v1" },
+        "claim_ref": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "context_ref": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "recipe_ref": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "evidence_ref": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "edge_ref": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "input_roots": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "verifier_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "verifier_version": { "type": "string", "minLength": 1 },
+        "result": { "enum": ["supports", "refutes"] },
+        "output_roots": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "policy_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "toolchain_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

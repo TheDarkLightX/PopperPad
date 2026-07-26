@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from popperpad.adapters import Bundle, TrustPolicy
-from popperpad.adapters.bundle import export_bundle
+from popperpad.adapters.bundle import bundle_root, export_bundle
 from popperpad.adapters.flow import import_bundle
 from popperpad.canonical import canonical_json_bytes, sha256_bytes
 from popperpad.core.codec import canonical_hash
@@ -286,7 +286,7 @@ def test_bundle_preflight_failure_commits_nothing(tmp_path: Path) -> None:
     )
     objects = {str(valid_ref): valid_bytes, str(invalid_ref): invalid_bytes}
     bundle_dir = tmp_path / "bundle"
-    export_bundle(
+    manifest = export_bundle(
         bundle,
         bundle_dir,
         objects=objects,
@@ -296,7 +296,14 @@ def test_bundle_preflight_failure_commits_nothing(tmp_path: Path) -> None:
 
     target = PopperPad(root=tmp_path / "target")
     target.init()
-    report = import_bundle(bundle_dir, target, TrustPolicy(require_signatures=False))
+    report = import_bundle(
+        bundle_dir,
+        target,
+        TrustPolicy(
+            require_signatures=False,
+            expected_bundle_root=bundle_root(manifest),
+        ),
+    )
     assert report.status == "rejected"
     assert report.imported_object_refs == ()
     assert target.log.stats() == {"event_count": 0, "head": ""}
