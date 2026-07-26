@@ -224,8 +224,8 @@ def project_state(profile: SingleSlotMarketProfileData, concrete: BountyState) -
 
     phase = AbstractPhase(concrete.phase.value)
     escrow = concrete.escrow_locked.atoms
-    sub_status, bond, sub_tc, sub_receipt_ref = _project_submission(concrete, profile)
-    ch_status, deposit, ch_tc, ch_receipt_ref = _project_challenge(concrete, profile)
+    sub_status, bond, sub_tc = _project_submission(concrete, profile)
+    ch_status, deposit, ch_tc = _project_challenge(concrete, profile)
     payable = bool(concrete.payable_submission_ids)
     settled = concrete.phase is BountyPhase.SETTLED
     mask = _project_processed_commands(concrete, profile)
@@ -234,11 +234,9 @@ def project_state(profile: SingleSlotMarketProfileData, concrete: BountyState) -
         escrow_atoms=escrow,
         submission_status=sub_status,
         submission_time_class=sub_tc,
-        submission_receipt_ref=sub_receipt_ref,
         bond_atoms=bond,
         challenge_status=ch_status,
         challenge_opened_time_class=ch_tc,
-        challenge_receipt_ref=ch_receipt_ref,
         deposit_atoms=deposit,
         payable=payable,
         settled=settled,
@@ -248,10 +246,10 @@ def project_state(profile: SingleSlotMarketProfileData, concrete: BountyState) -
 
 def _project_submission(
     state: BountyState, profile: SingleSlotMarketProfileData,
-) -> tuple[AbstractSubmissionStatus, int, TimeClassOrNone, str | None]:
+) -> tuple[AbstractSubmissionStatus, int, TimeClassOrNone]:
     matching = [s for s in state.submissions if s.submission_id == profile.submission_id]
     if not matching:
-        return (AbstractSubmissionStatus.NONE, 0, TimeClassOrNone.NONE, None)
+        return (AbstractSubmissionStatus.NONE, 0, TimeClassOrNone.NONE)
     sub = matching[0]
     status_map = {
         SubmissionStatus.PENDING: AbstractSubmissionStatus.PENDING,
@@ -259,15 +257,15 @@ def _project_submission(
         SubmissionStatus.REJECTED: AbstractSubmissionStatus.REJECTED,
     }
     tc = _epoch_to_time_class(profile, sub.submitted_at)
-    return (status_map[sub.status], sub.bond_locked.atoms, tc, sub.verifier_receipt_ref)
+    return (status_map[sub.status], sub.bond_locked.atoms, tc)
 
 
 def _project_challenge(
     state: BountyState, profile: SingleSlotMarketProfileData,
-) -> tuple[AbstractChallengeStatus, int, TimeClassOrNone, str | None]:
+) -> tuple[AbstractChallengeStatus, int, TimeClassOrNone]:
     matching = [c for c in state.challenges if c.challenge_id == profile.challenge_id]
     if not matching:
-        return (AbstractChallengeStatus.NONE, 0, TimeClassOrNone.NONE, None)
+        return (AbstractChallengeStatus.NONE, 0, TimeClassOrNone.NONE)
     ch = matching[0]
     status_map = {
         ChallengeStatus.OPEN: AbstractChallengeStatus.OPEN,
@@ -275,7 +273,7 @@ def _project_challenge(
         ChallengeStatus.REJECTED: AbstractChallengeStatus.REJECTED,
     }
     tc = _epoch_to_time_class(profile, ch.opened_at)
-    return (status_map[ch.status], ch.deposit_locked.atoms, tc, ch.verifier_receipt_ref)
+    return (status_map[ch.status], ch.deposit_locked.atoms, tc)
 
 
 def _project_processed_commands(state: BountyState, profile: SingleSlotMarketProfileData) -> int:
@@ -326,6 +324,9 @@ def _concretize_submissions(
         AbstractSubmissionStatus.VERIFIED: SubmissionStatus.VERIFIED,
         AbstractSubmissionStatus.REJECTED: SubmissionStatus.REJECTED,
     }
+    receipt = profile.verifier_receipt_ref if abstract.submission_status in (
+        AbstractSubmissionStatus.VERIFIED, AbstractSubmissionStatus.REJECTED,
+    ) else None
     submitted_at = _time_class_to_epoch(profile, abstract.submission_time_class)
     return (
         SubmissionState(
@@ -338,7 +339,7 @@ def _concretize_submissions(
             submitted_at=submitted_at,
             status=status_map[abstract.submission_status],
             bond_locked=Amount(abstract.bond_atoms),
-            verifier_receipt_ref=abstract.submission_receipt_ref,
+            verifier_receipt_ref=receipt,
         ),
     )
 
@@ -353,6 +354,9 @@ def _concretize_challenges(
         AbstractChallengeStatus.UPHELD: ChallengeStatus.UPHELD,
         AbstractChallengeStatus.REJECTED: ChallengeStatus.REJECTED,
     }
+    receipt = profile.challenge_receipt_ref if abstract.challenge_status in (
+        AbstractChallengeStatus.UPHELD, AbstractChallengeStatus.REJECTED,
+    ) else None
     opened_at = _time_class_to_epoch(profile, abstract.challenge_opened_time_class)
     return (
         ChallengeState(
@@ -364,7 +368,7 @@ def _concretize_challenges(
             opened_at=opened_at,
             status=status_map[abstract.challenge_status],
             deposit_locked=Amount(abstract.deposit_atoms),
-            verifier_receipt_ref=abstract.challenge_receipt_ref,
+            verifier_receipt_ref=receipt,
         ),
     )
 
