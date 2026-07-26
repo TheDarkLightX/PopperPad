@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `8478691f41fb73bec9db50237527721659100118`
-- bound source revision: `4d5d71ffe0137202ed069aa666eca48cb8651821`
+- bound source revision: `24e8169c6a60740475e3058b9c0ecb446a02a0ff`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -83,6 +83,12 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
    labeled complete.
 9. Structural collection violations stop later semantic iteration, preserving
    the market transition's total rejection contract for malformed values.
+10. Settlement references are rejected in every phase except `SETTLED`,
+    including terminal `EXPIRED` and `CANCELED` states.
+11. JSONL draining treats only LF as the `readline` delimiter, so a CR at a
+    bounded chunk edge cannot split one physical record into two requests.
+12. The source-manifest loader validates the schema stored on disk instead of
+    replacing it with a local constant.
 
 ## Completed evidence
 
@@ -95,8 +101,10 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
   commitments, and oversized-line recovery.
 - Profile-shift and malformed-collection regressions cover enumeration inputs
   and total-transition behavior.
+- Terminal-state, chunk-boundary, and manifest-schema regressions cover the
+  final fail-closed integrity cases.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 398 tests.
+- The complete local Python suite passes: 401 tests.
 - Rust formatting and strict clippy pass; all 13 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the

@@ -1,7 +1,7 @@
 {
   "schema": "popperpad/data-adapter-source-manifest/v1",
   "repository": "TheDarkLightX/PopperPad",
-  "commit": "4d5d71ffe0137202ed069aa666eca48cb8651821",
+  "commit": "24e8169c6a60740475e3058b9c0ecb446a02a0ff",
   "files": [
     {
       "path": "src/popperpad/core/adapter_protocol.py",
@@ -17,7 +17,7 @@
     },
     {
       "path": "src/popperpad/core/market_invariants.py",
-      "sha256": "sha256:a5e9d733831bff19beaaf61ad4d423db3911e46b449a63808a1ba8e75c5f0da0"
+      "sha256": "sha256:5a45b113a01480ef87832610be4e5107f64385773a3c3f3fe4415a8a51cf8265"
     },
     {
       "path": "src/popperpad/core/result.py",
@@ -45,11 +45,11 @@
     },
     {
       "path": "src/popperpad/refinement/profiles/market_single_slot_v1.py",
-      "sha256": "sha256:cf00be1b65648331eeda2c04452200bcae78e17bebd1c55aedffdf37cef44033"
+      "sha256": "sha256:1f8cace2c203a81f64c511d07794d75da81aac53258ec12f3579354221f5bec9"
     },
     {
       "path": "src/popperpad/shells/data_adapter_jsonl.py",
-      "sha256": "sha256:7871fe64409d648b7419f8c0bc025adece85dc261402f6b8a89543b5c49873c2"
+      "sha256": "sha256:689432e1ff58899f4378f1a561f654f5b323dbe0ad6afdd047c5ea4281b369b8"
     }
   ],
   "profile_hash": "sha256:6765ad5c609d7bf20a1171666ce6e42afa82afe295206e868c757b0113df9bf1",
