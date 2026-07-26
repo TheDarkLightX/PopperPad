@@ -1,0 +1,481 @@
+"""Finite single-slot falsification-market abstract state.
+
+The abstract state is a genuinely finite closed value — not a mirror of
+arbitrary concrete ``BountyState`` JSON. Concrete identities and timestamps
+are supplied by the profile. Authority receipt references are preserved as
+fixed-width SHA-256 values so projection never changes the authoritative
+concrete state.
+
+State dimensions (all finite):
+  - phase: 6 values (draft, open, payable, settled, expired, canceled)
+  - escrow_atoms: bounded by profile (0 or reward_atoms)
+  - submission_status: 4 values (none, pending, verified, rejected)
+  - submission_time_class: 6 values (none + 5 time classes)
+  - submission_receipt_ref: none or a fixed-width SHA-256 value
+  - bond_atoms: bounded by profile (0 or bond_atoms)
+  - challenge_status: 4 values (none, open, upheld, rejected)
+  - challenge_opened_time_class: 6 values (none + 5 time classes)
+  - challenge_receipt_ref: none or a fixed-width SHA-256 value
+  - deposit_atoms: bounded by profile (0 or deposit_atoms)
+  - payable: 2 values (false, true)
+  - settled: 2 values (false, true)
+  - processed_command_mask: bounded bitset over declared command slots
+
+The time-class fields preserve the temporal context in which a submission
+or challenge was created. This is semantically necessary because challenge
+resolution compares the command time with a deadline computed from the
+challenge's actual ``opened_at`` time, and advancement distinguishes an
+adjudication window from a timed-out challenge.
+
+The profile supplies fixed concrete identities for concretization.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import ClassVar
+
+from ..core.values import ClosedStrEnum, DeeplyImmutable, FrozenDict, JsonValue, freeze_json
+
+
+class AbstractPhase(ClosedStrEnum):
+    __slots__ = ()
+
+    DRAFT: ClassVar[AbstractPhase]
+    OPEN: ClassVar[AbstractPhase]
+    PAYABLE: ClassVar[AbstractPhase]
+    SETTLED: ClassVar[AbstractPhase]
+    EXPIRED: ClassVar[AbstractPhase]
+    CANCELED: ClassVar[AbstractPhase]
+    _symbols = (
+        ("DRAFT", "draft"),
+        ("OPEN", "open"),
+        ("PAYABLE", "payable"),
+        ("SETTLED", "settled"),
+        ("EXPIRED", "expired"),
+        ("CANCELED", "canceled"),
+    )
+
+
+class AbstractSubmissionStatus(ClosedStrEnum):
+    __slots__ = ()
+
+    NONE: ClassVar[AbstractSubmissionStatus]
+    PENDING: ClassVar[AbstractSubmissionStatus]
+    VERIFIED: ClassVar[AbstractSubmissionStatus]
+    REJECTED: ClassVar[AbstractSubmissionStatus]
+    _symbols = (
+        ("NONE", "none"),
+        ("PENDING", "pending"),
+        ("VERIFIED", "verified"),
+        ("REJECTED", "rejected"),
+    )
+
+
+class AbstractChallengeStatus(ClosedStrEnum):
+    __slots__ = ()
+
+    NONE: ClassVar[AbstractChallengeStatus]
+    OPEN: ClassVar[AbstractChallengeStatus]
+    UPHELD: ClassVar[AbstractChallengeStatus]
+    REJECTED: ClassVar[AbstractChallengeStatus]
+    _symbols = (
+        ("NONE", "none"),
+        ("OPEN", "open"),
+        ("UPHELD", "upheld"),
+        ("REJECTED", "rejected"),
+    )
+
+
+class AbstractCommandKind(ClosedStrEnum):
+    __slots__ = ()
+
+    OPEN_BOUNTY: ClassVar[AbstractCommandKind]
+    SUBMIT_CANDIDATE: ClassVar[AbstractCommandKind]
+    VERIFY_SUBMISSION: ClassVar[AbstractCommandKind]
+    OPEN_CHALLENGE: ClassVar[AbstractCommandKind]
+    RESOLVE_CHALLENGE: ClassVar[AbstractCommandKind]
+    ADVANCE_BOUNTY: ClassVar[AbstractCommandKind]
+    SETTLE_BOUNTY: ClassVar[AbstractCommandKind]
+    CANCEL_BOUNTY: ClassVar[AbstractCommandKind]
+    _symbols = (
+        ("OPEN_BOUNTY", "open_bounty"),
+        ("SUBMIT_CANDIDATE", "submit_candidate"),
+        ("VERIFY_SUBMISSION", "verify_submission"),
+        ("OPEN_CHALLENGE", "open_challenge"),
+        ("RESOLVE_CHALLENGE", "resolve_challenge"),
+        ("ADVANCE_BOUNTY", "advance_bounty"),
+        ("SETTLE_BOUNTY", "settle_bounty"),
+        ("CANCEL_BOUNTY", "cancel_bounty"),
+    )
+
+
+class TimeClass(ClosedStrEnum):
+    __slots__ = ()
+
+    PRE_DEADLINE: ClassVar[TimeClass]
+    AT_DEADLINE: ClassVar[TimeClass]
+    CHALLENGE_WINDOW: ClassVar[TimeClass]
+    POST_CHALLENGE_WINDOW: ClassVar[TimeClass]
+    POST_RESOLUTION_DEADLINE: ClassVar[TimeClass]
+    _symbols = (
+        ("PRE_DEADLINE", "pre_deadline"),
+        ("AT_DEADLINE", "at_deadline"),
+        ("CHALLENGE_WINDOW", "challenge_window"),
+        ("POST_CHALLENGE_WINDOW", "post_challenge_window"),
+        ("POST_RESOLUTION_DEADLINE", "post_resolution_deadline"),
+    )
+
+
+class TimeClassOrNone(ClosedStrEnum):
+    """Time class or 'none' for when no submission/challenge exists."""
+
+    __slots__ = ()
+
+    NONE: ClassVar[TimeClassOrNone]
+    PRE_DEADLINE: ClassVar[TimeClassOrNone]
+    AT_DEADLINE: ClassVar[TimeClassOrNone]
+    CHALLENGE_WINDOW: ClassVar[TimeClassOrNone]
+    POST_CHALLENGE_WINDOW: ClassVar[TimeClassOrNone]
+    POST_RESOLUTION_DEADLINE: ClassVar[TimeClassOrNone]
+    _symbols = (
+        ("NONE", "none"),
+        ("PRE_DEADLINE", "pre_deadline"),
+        ("AT_DEADLINE", "at_deadline"),
+        ("CHALLENGE_WINDOW", "challenge_window"),
+        ("POST_CHALLENGE_WINDOW", "post_challenge_window"),
+        ("POST_RESOLUTION_DEADLINE", "post_resolution_deadline"),
+    )
+
+
+# Command slots — each transition uses a fixed command ID from the profile.
+COMMAND_SLOTS: tuple[AbstractCommandKind, ...] = tuple(AbstractCommandKind)
+
+_STATE_FIELDS = frozenset(
+    {
+        "phase",
+        "escrow_atoms",
+        "submission_status",
+        "submission_time_class",
+        "submission_receipt_ref",
+        "bond_atoms",
+        "challenge_status",
+        "challenge_opened_time_class",
+        "challenge_receipt_ref",
+        "deposit_atoms",
+        "payable",
+        "settled",
+        "processed_command_mask",
+    }
+)
+_SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _require_exact_fields(
+    data: FrozenDict[JsonValue],
+    expected: frozenset[str],
+    field_path: str,
+) -> None:
+    actual = frozenset(data)
+    unknown = sorted(actual - expected)
+    if unknown:
+        raise ValueError(f"{field_path} contains unknown fields: {unknown}")
+    missing = sorted(expected - actual)
+    if missing:
+        raise ValueError(f"{field_path} is missing required fields: {missing}")
+
+
+@dataclass(frozen=True, slots=True)
+class SingleSlotAbstractState(DeeplyImmutable):
+    """Genuinely finite single-slot market state.
+
+    No arbitrary IDs, timestamps, or processed-command strings.
+    Authority receipt references are fixed-width 256-bit values.
+    The processed_command_mask is a bounded bitset over the 8 declared
+    command slots, giving 2^8 = 256 possible masks.
+
+    submission_time_class and challenge_opened_time_class preserve the
+    temporal context needed for time-dependent transition semantics.
+    """
+
+    phase: AbstractPhase
+    escrow_atoms: int
+    submission_status: AbstractSubmissionStatus
+    submission_time_class: TimeClassOrNone
+    submission_receipt_ref: str | None
+    bond_atoms: int
+    challenge_status: AbstractChallengeStatus
+    challenge_opened_time_class: TimeClassOrNone
+    challenge_receipt_ref: str | None
+    deposit_atoms: int
+    payable: bool
+    settled: bool
+    processed_command_mask: int
+
+    def __post_init__(self) -> None:
+        if type(self.phase) is not AbstractPhase:
+            raise TypeError("phase must be AbstractPhase")
+        if type(self.escrow_atoms) is not int or isinstance(self.escrow_atoms, bool):
+            raise TypeError("escrow_atoms must be an integer")
+        if self.escrow_atoms < 0:
+            raise ValueError("escrow_atoms must be non-negative")
+        if type(self.submission_status) is not AbstractSubmissionStatus:
+            raise TypeError("submission_status must be AbstractSubmissionStatus")
+        if type(self.submission_time_class) is not TimeClassOrNone:
+            raise TypeError("submission_time_class must be TimeClassOrNone")
+        _require_optional_receipt_ref(
+            self.submission_receipt_ref,
+            "submission_receipt_ref",
+        )
+        if type(self.bond_atoms) is not int or isinstance(self.bond_atoms, bool):
+            raise TypeError("bond_atoms must be an integer")
+        if self.bond_atoms < 0:
+            raise ValueError("bond_atoms must be non-negative")
+        if type(self.challenge_status) is not AbstractChallengeStatus:
+            raise TypeError("challenge_status must be AbstractChallengeStatus")
+        if type(self.challenge_opened_time_class) is not TimeClassOrNone:
+            raise TypeError("challenge_opened_time_class must be TimeClassOrNone")
+        _require_optional_receipt_ref(
+            self.challenge_receipt_ref,
+            "challenge_receipt_ref",
+        )
+        if type(self.deposit_atoms) is not int or isinstance(self.deposit_atoms, bool):
+            raise TypeError("deposit_atoms must be an integer")
+        if self.deposit_atoms < 0:
+            raise ValueError("deposit_atoms must be non-negative")
+        if type(self.payable) is not bool:
+            raise TypeError("payable must be a bool")
+        if type(self.settled) is not bool:
+            raise TypeError("settled must be a bool")
+        if type(self.processed_command_mask) is not int or isinstance(self.processed_command_mask, bool):
+            raise TypeError("processed_command_mask must be an integer")
+        if self.processed_command_mask < 0 or self.processed_command_mask >= (1 << len(COMMAND_SLOTS)):
+            raise ValueError("processed_command_mask out of range")
+        _check_temporal_consistency(self)
+        _check_receipt_consistency(self)
+        DeeplyImmutable.__post_init__(self)
+
+    def command_processed(self, slot: AbstractCommandKind) -> bool:
+        return bool(self.processed_command_mask & (1 << COMMAND_SLOTS.index(slot)))
+
+    def with_command_processed(self, slot: AbstractCommandKind) -> "SingleSlotAbstractState":
+        bit = 1 << COMMAND_SLOTS.index(slot)
+        return SingleSlotAbstractState(
+            phase=self.phase,
+            escrow_atoms=self.escrow_atoms,
+            submission_status=self.submission_status,
+            submission_time_class=self.submission_time_class,
+            submission_receipt_ref=self.submission_receipt_ref,
+            bond_atoms=self.bond_atoms,
+            challenge_status=self.challenge_status,
+            challenge_opened_time_class=self.challenge_opened_time_class,
+            challenge_receipt_ref=self.challenge_receipt_ref,
+            deposit_atoms=self.deposit_atoms,
+            payable=self.payable,
+            settled=self.settled,
+            processed_command_mask=self.processed_command_mask | bit,
+        )
+
+    def as_json(self) -> FrozenDict[JsonValue]:
+        value = freeze_json(
+            {
+                "phase": self.phase.value,
+                "escrow_atoms": self.escrow_atoms,
+                "submission_status": self.submission_status.value,
+                "submission_time_class": self.submission_time_class.value,
+                "submission_receipt_ref": self.submission_receipt_ref,
+                "bond_atoms": self.bond_atoms,
+                "challenge_status": self.challenge_status.value,
+                "challenge_opened_time_class": self.challenge_opened_time_class.value,
+                "challenge_receipt_ref": self.challenge_receipt_ref,
+                "deposit_atoms": self.deposit_atoms,
+                "payable": self.payable,
+                "settled": self.settled,
+                "processed_command_mask": self.processed_command_mask,
+            }
+        )
+        assert isinstance(value, FrozenDict)
+        return value
+
+    @classmethod
+    def from_json(cls, data: FrozenDict[JsonValue]) -> "SingleSlotAbstractState":
+        _require_exact_fields(data, _STATE_FIELDS, "state")
+        return cls(
+            phase=AbstractPhase(data["phase"]),
+            escrow_atoms=data["escrow_atoms"],
+            submission_status=AbstractSubmissionStatus(data["submission_status"]),
+            submission_time_class=TimeClassOrNone(data["submission_time_class"]),
+            submission_receipt_ref=data["submission_receipt_ref"],
+            bond_atoms=data["bond_atoms"],
+            challenge_status=AbstractChallengeStatus(data["challenge_status"]),
+            challenge_opened_time_class=TimeClassOrNone(data["challenge_opened_time_class"]),
+            challenge_receipt_ref=data["challenge_receipt_ref"],
+            deposit_atoms=data["deposit_atoms"],
+            payable=data["payable"],
+            settled=data["settled"],
+            processed_command_mask=data["processed_command_mask"],
+        )
+
+
+def _require_optional_receipt_ref(value: str | None, field_name: str) -> None:
+    if value is None:
+        return
+    if type(value) is not str:
+        raise TypeError(f"{field_name} must be null or a string")
+    if not _SHA256_REF_RE.fullmatch(value):
+        raise ValueError(f"{field_name} must be a canonical sha256 reference")
+
+
+def _check_temporal_consistency(state: SingleSlotAbstractState) -> None:
+    """Ensure time-class fields are consistent with existence fields."""
+
+    if state.submission_status is AbstractSubmissionStatus.NONE:
+        if state.submission_time_class is not TimeClassOrNone.NONE:
+            raise ValueError("submission_time_class must be none when submission_status is none")
+    else:
+        if state.submission_time_class is TimeClassOrNone.NONE:
+            raise ValueError("submission_time_class must not be none when submission exists")
+    if state.challenge_status is AbstractChallengeStatus.NONE:
+        if state.challenge_opened_time_class is not TimeClassOrNone.NONE:
+            raise ValueError("challenge_opened_time_class must be none when challenge_status is none")
+    else:
+        if state.challenge_opened_time_class is TimeClassOrNone.NONE:
+            raise ValueError("challenge_opened_time_class must not be none when challenge exists")
+
+
+def _check_receipt_consistency(state: SingleSlotAbstractState) -> None:
+    submission_resolved = state.submission_status in (
+        AbstractSubmissionStatus.VERIFIED,
+        AbstractSubmissionStatus.REJECTED,
+    )
+    if submission_resolved and state.submission_receipt_ref is None:
+        raise ValueError("submission_receipt_ref is required for a resolved submission")
+    if not submission_resolved and state.submission_receipt_ref is not None:
+        raise ValueError("submission_receipt_ref requires a resolved submission")
+
+    challenge_resolved = state.challenge_status in (
+        AbstractChallengeStatus.UPHELD,
+        AbstractChallengeStatus.REJECTED,
+    )
+    if not challenge_resolved and state.challenge_receipt_ref is not None:
+        raise ValueError("challenge_receipt_ref requires a resolved challenge")
+
+
+def validate_state_bounds(
+    state: SingleSlotAbstractState,
+    reward_atoms: int,
+    bond_atoms: int,
+    deposit_atoms: int,
+) -> None:
+    """Validate that abstract state amounts are within profile-declared bounds."""
+
+    if state.escrow_atoms > reward_atoms:
+        raise ValueError(f"escrow_atoms {state.escrow_atoms} exceeds reward_atoms {reward_atoms}")
+    if state.bond_atoms > bond_atoms:
+        raise ValueError(f"bond_atoms {state.bond_atoms} exceeds profile bond_atoms {bond_atoms}")
+    if state.deposit_atoms > deposit_atoms:
+        raise ValueError(f"deposit_atoms {state.deposit_atoms} exceeds profile deposit_atoms {deposit_atoms}")
+
+
+def initial_abstract_state() -> SingleSlotAbstractState:
+    """The initial draft state with no activity."""
+
+    return SingleSlotAbstractState(
+        phase=AbstractPhase.DRAFT,
+        escrow_atoms=0,
+        submission_status=AbstractSubmissionStatus.NONE,
+        submission_time_class=TimeClassOrNone.NONE,
+        submission_receipt_ref=None,
+        bond_atoms=0,
+        challenge_status=AbstractChallengeStatus.NONE,
+        challenge_opened_time_class=TimeClassOrNone.NONE,
+        challenge_receipt_ref=None,
+        deposit_atoms=0,
+        payable=False,
+        settled=False,
+        processed_command_mask=0,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SingleSlotAbstractCommand(DeeplyImmutable):
+    """An abstract command for the single-slot profile.
+
+    The command kind selects the transition. For verify_submission, the
+    accepted boolean selects the sub-variant. For resolve_challenge, the
+    upheld boolean selects the sub-variant. All other kinds must not carry
+    accepted, upheld, or verifier evidence — variant-inapplicable fields are
+    rejected.
+
+    State and command identities come from the finite profile. Verifier
+    authority commands may additionally carry one exact caller-supplied,
+    content-addressed receipt whose signature the market core verifies.
+    """
+
+    kind: AbstractCommandKind
+    accepted: bool | None = None
+    upheld: bool | None = None
+    verifier_receipt: FrozenDict[JsonValue] | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not AbstractCommandKind:
+            raise TypeError("kind must be AbstractCommandKind")
+        if self.accepted is not None and type(self.accepted) is not bool:
+            raise TypeError("accepted must be null or bool")
+        if self.upheld is not None and type(self.upheld) is not bool:
+            raise TypeError("upheld must be null or bool")
+        if self.verifier_receipt is not None and type(self.verifier_receipt) is not FrozenDict:
+            raise TypeError("verifier_receipt must be null or FrozenDict")
+        needs_accepted = self.kind is AbstractCommandKind.VERIFY_SUBMISSION
+        needs_upheld = self.kind is AbstractCommandKind.RESOLVE_CHALLENGE
+        supports_receipt = needs_accepted or needs_upheld
+        if needs_accepted and self.accepted is None:
+            raise ValueError("verify_submission requires accepted")
+        if not needs_accepted and self.accepted is not None:
+            raise ValueError(f"accepted is not applicable to {self.kind.value}")
+        if needs_upheld and self.upheld is None:
+            raise ValueError("resolve_challenge requires upheld")
+        if not needs_upheld and self.upheld is not None:
+            raise ValueError(f"upheld is not applicable to {self.kind.value}")
+        if not supports_receipt and self.verifier_receipt is not None:
+            raise ValueError(f"verifier_receipt is not applicable to {self.kind.value}")
+        DeeplyImmutable.__post_init__(self)
+
+    def as_json(self) -> FrozenDict[JsonValue]:
+        fields: dict[str, JsonValue] = {"kind": self.kind.value}
+        if self.accepted is not None:
+            fields["accepted"] = self.accepted
+        if self.upheld is not None:
+            fields["upheld"] = self.upheld
+        if self.verifier_receipt is not None:
+            fields["verifier_receipt"] = self.verifier_receipt
+        value = freeze_json(fields)
+        assert isinstance(value, FrozenDict)
+        return value
+
+    @classmethod
+    def from_json(cls, data: FrozenDict[JsonValue]) -> "SingleSlotAbstractCommand":
+        kind = AbstractCommandKind(data["kind"])
+        allowed = frozenset({"kind", "accepted", "upheld", "verifier_receipt"})
+        unknown = sorted(frozenset(data) - allowed)
+        if unknown:
+            raise ValueError(f"command contains unknown fields: {unknown}")
+        if kind is not AbstractCommandKind.VERIFY_SUBMISSION and "accepted" in data:
+            raise ValueError(f"accepted is not applicable to {kind.value}")
+        if kind is not AbstractCommandKind.RESOLVE_CHALLENGE and "upheld" in data:
+            raise ValueError(f"upheld is not applicable to {kind.value}")
+        if kind not in (
+            AbstractCommandKind.VERIFY_SUBMISSION,
+            AbstractCommandKind.RESOLVE_CHALLENGE,
+        ) and "verifier_receipt" in data:
+            raise ValueError(f"verifier_receipt is not applicable to {kind.value}")
+        accepted = data.get("accepted")
+        upheld = data.get("upheld")
+        verifier_receipt = data.get("verifier_receipt")
+        return cls(
+            kind=kind,
+            accepted=accepted,
+            upheld=upheld,
+            verifier_receipt=verifier_receipt,
+        )

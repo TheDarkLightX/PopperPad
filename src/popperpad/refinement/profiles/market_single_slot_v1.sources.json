@@ -1,0 +1,61 @@
+{
+  "schema": "popperpad/data-adapter-source-manifest/v1",
+  "repository": "TheDarkLightX/PopperPad",
+  "commit": "ee8d247e7f446eace45c7ee69e63b33e3b53abeb",
+  "files": [
+    {
+      "path": "src/popperpad/core/adapter_protocol.py",
+      "sha256": "sha256:a7037b297f53d323e9075d1053bdb7fce5aba51e22cdaae089878ed799a105d6"
+    },
+    {
+      "path": "src/popperpad/core/codec.py",
+      "sha256": "sha256:adc85c40a28e46dd7fe558a0359cc8e0b8d0ce8be43c3e90664197095e6b0079"
+    },
+    {
+      "path": "src/popperpad/core/market.py",
+      "sha256": "sha256:119431dbc6295d8c616816a7b582e41513d9490a1f1a947bf4a4ca74361495be"
+    },
+    {
+      "path": "src/popperpad/core/market_invariants.py",
+      "sha256": "sha256:5a45b113a01480ef87832610be4e5107f64385773a3c3f3fe4415a8a51cf8265"
+    },
+    {
+      "path": "src/popperpad/core/result.py",
+      "sha256": "sha256:f1b7a0d43eb1fbef195017fad299f3ea3f74d7f3ee92e1b394f8e5c75953a3b5"
+    },
+    {
+      "path": "src/popperpad/core/values.py",
+      "sha256": "sha256:8d5d37b92147f4510fe0f4423c0256731612d6f1477827ccb859f74417543404"
+    },
+    {
+      "path": "src/popperpad/core/verifier.py",
+      "sha256": "sha256:c0fec9c47390108982780af5adf5d81ea0eb7ae059b5895a7f45706dd91c52e9"
+    },
+    {
+      "path": "src/popperpad/refinement/enumerator.py",
+      "sha256": "sha256:8e6e9be9103a0639e0b3b3dcf0a8312d75ed3fb41ae3e496f715b66b5cd80c10"
+    },
+    {
+      "path": "src/popperpad/refinement/finite_state.py",
+      "sha256": "sha256:0bc022a818317bcb2ca8f43c93cc14b90ab06b283756fd30247ee977b1c0fc64"
+    },
+    {
+      "path": "src/popperpad/refinement/market_adapter.py",
+      "sha256": "sha256:5b300fb9dd898eb1a496eb64c72645eb33e235ae975ad63abe52f7bb52dda8d1"
+    },
+    {
+      "path": "src/popperpad/refinement/profiles/market_single_slot_v1.json",
+      "sha256": "sha256:bbd6c6ff5a9e6497172a87b24224f10eced5cb2f99912c21a2a3c1c08705946d"
+    },
+    {
+      "path": "src/popperpad/refinement/profiles/market_single_slot_v1.py",
+      "sha256": "sha256:1f8cace2c203a81f64c511d07794d75da81aac53258ec12f3579354221f5bec9"
+    },
+    {
+      "path": "src/popperpad/shells/data_adapter_jsonl.py",
+      "sha256": "sha256:dc64997492fc6dacf3b1ff6a4a43e6daaf3c3df56ff644d85872ca064fae2535"
+    }
+  ],
+  "profile_hash": "sha256:13de64edc0e98a8c006704c6b48f0e79c6267e80f5401b2ed690ede706672764",
+  "codec_version": "popperpad-json-int-v2"
+}

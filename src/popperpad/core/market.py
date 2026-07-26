@@ -974,79 +974,10 @@ def _validate_common_command(command: MarketCommand) -> Reject | None:
 
 
 def _validate_market_state(value: object) -> str | None:
-    if type(value) is not BountyState:
-        return f"expected BountyState, got {type(value).__name__}"
-    state = value
-    if type(state.terms) is not BountyTerms:
-        return "terms must be BountyTerms"
-    terms = state.terms
-    if not all(
-        (
-            _valid_id(terms.bounty_id),
-            isinstance(terms.sponsor_ref, str) and bool(terms.sponsor_ref),
-            _valid_ref(terms.claim_ref),
-            terms.context_ref is None or _valid_ref(terms.context_ref),
-            type(terms.reward) is Amount and terms.reward.atoms > 0,
-            type(terms.minimum_submission_bond) is Amount,
-            _is_non_negative_int(terms.deadline_epoch_s),
-            _is_non_negative_int(terms.challenge_window_seconds),
-            _is_ref_frozenset(terms.accepted_recipe_refs, non_empty=True),
-            _is_ref_frozenset(terms.accepted_verifier_refs, non_empty=True),
-        )
-    ):
-        return "terms contain invalid runtime values"
-    if type(state.phase) is not BountyPhase:
-        return "phase must be BountyPhase"
-    if type(state.escrow_locked) is not Amount:
-        return "escrow_locked must be Amount"
-    if not isinstance(state.submissions, tuple) or any(
-        not _valid_submission_state(submission) for submission in state.submissions
-    ):
-        return "submissions contain invalid runtime values"
-    if not isinstance(state.challenges, tuple) or any(
-        not _valid_challenge_state(challenge) for challenge in state.challenges
-    ):
-        return "challenges contain invalid runtime values"
-    if not _is_id_tuple(state.payable_submission_ids):
-        return "payable_submission_ids must be a tuple of valid ids"
-    if len(set(state.payable_submission_ids)) != len(state.payable_submission_ids):
-        return "payable_submission_ids must be unique"
+    from .market_invariants import market_state_violations
 
-    submissions_by_id = {
-        submission.submission_id: submission for submission in state.submissions
-    }
-    if len(submissions_by_id) != len(state.submissions):
-        return "submission ids must be unique"
-    challenge_ids = {challenge.challenge_id for challenge in state.challenges}
-    if len(challenge_ids) != len(state.challenges):
-        return "challenge ids must be unique"
-    if any(
-        challenge.submission_id not in submissions_by_id
-        for challenge in state.challenges
-    ):
-        return "challenges must reference existing submissions"
-    for submission_id in state.payable_submission_ids:
-        submission = submissions_by_id.get(submission_id)
-        if submission is None:
-            return "payable_submission_ids must reference existing submissions"
-        if submission.status is not SubmissionStatus.VERIFIED:
-            return "payable_submission_ids must reference verified submissions"
-    if state.phase is BountyPhase.PAYABLE and not state.payable_submission_ids:
-        return "payable state must contain a verified submission"
-    if state.payable_submission_ids and state.phase not in (
-        BountyPhase.PAYABLE,
-        BountyPhase.SETTLED,
-    ):
-        return "payable submissions are inconsistent with the bounty phase"
-    if state.settlement_ref is not None and (
-        not isinstance(state.settlement_ref, str) or not state.settlement_ref
-    ):
-        return "settlement_ref must be null or a non-empty string"
-    if not isinstance(state.processed_command_ids, frozenset) or not all(
-        _valid_id(command_id) for command_id in state.processed_command_ids
-    ):
-        return "processed_command_ids must contain valid ids"
-    return None
+    violations = market_state_violations(value)
+    return None if not violations else violations[0].render()
 
 
 def _validate_market_policy(value: object) -> str | None:

@@ -1,0 +1,71 @@
+{
+  "bounty_terms": {
+    "bounty_id": "bounty-1",
+    "sponsor_ref": "did:example:sponsor",
+    "claim_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "context_ref": null,
+    "reward_atoms": 1000,
+    "minimum_submission_bond_atoms": 100,
+    "deadline_epoch_s": 1000,
+    "challenge_window_seconds": 100,
+    "accepted_recipe_refs": [
+      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ],
+    "accepted_verifier_refs": [
+      "sha256:2c333f465cfc21933e6e9cd91adf7734e6552732cd3b49ff2f0e849842034951"
+    ]
+  },
+  "market_policy": {
+    "minimum_bounty_atoms": 1000,
+    "minimum_submission_bond_atoms": 100,
+    "minimum_challenge_deposit_atoms": 50,
+    "slashable_findings": [
+      "invalid_signature"
+    ],
+    "treasury_ref": "protocol:treasury",
+    "challenge_resolution_seconds": 100
+  },
+  "identities": {
+    "submission_id": "submission-1",
+    "challenge_id": "challenge-1",
+    "sponsor_ref": "did:example:sponsor",
+    "submitter_ref": "did:example:refuter",
+    "challenger_ref": "did:example:challenger",
+    "recipe_ref": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verifier_ref": "sha256:2c333f465cfc21933e6e9cd91adf7734e6552732cd3b49ff2f0e849842034951",
+    "evidence_refs": [
+      "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    ],
+    "artifact_refs": [
+      "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    ],
+    "verifier_receipt_ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "challenge_evidence_refs": [
+      "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    ],
+    "challenge_receipt_ref": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "settlement_ref": "chain:tx:1"
+  },
+  "command_ids": {
+    "open_bounty": "cmd-open",
+    "submit_candidate": "cmd-submit",
+    "verify_submission": "cmd-verify",
+    "open_challenge": "cmd-challenge",
+    "resolve_challenge": "cmd-resolve",
+    "advance_bounty": "cmd-advance",
+    "settle_bounty": "cmd-settle",
+    "cancel_bounty": "cmd-cancel"
+  },
+  "time_representatives": {
+    "pre_deadline": 100,
+    "at_deadline": 1000,
+    "challenge_window": 1050,
+    "post_challenge_window": 1101,
+    "post_resolution_deadline": 1200
+  },
+  "bounds": {
+    "reward_atoms": 1000,
+    "bond_atoms": 100,
+    "deposit_atoms": 50
+  }
+}
