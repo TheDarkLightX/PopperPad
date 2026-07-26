@@ -4,6 +4,14 @@ PopperPad is scientific memory for humans and agents: an append-only,
 falsification-first knowledge ledger for hypotheses, recipes, evidence,
 counterexamples, artifacts, and typed relationships between claims.
 
+> [!WARNING]
+> **Public alpha: run only recipes and bundles you have written or audited.**
+> Recipe execution currently invokes host subprocesses and is not an operating-system
+> sandbox. A temporary working directory does not prevent filesystem access, network
+> access, environment-secret access, or uncontrolled child processes. Do not execute
+> untrusted third-party recipes. Remote signatures, hostile bundle import, automated
+> bounty settlement, and trustless federation are not production security boundaries yet.
+
 It is designed to be:
 - **Offline-first**: local directory, no services required.
 - **Fail-closed**: “verdicts” are derived from replayable evidence, not asserted.
