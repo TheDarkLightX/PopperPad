@@ -8,7 +8,7 @@ from popperpad.canonical import canonical_hash, canonical_json_bytes, sha256_byt
 from popperpad.core.commit import CommitBundle, plan_commit
 
 
-VECTOR_PATH = Path(__file__).resolve().parents[1] / "vectors" / "fcis-v1.json"
+VECTOR_PATH = Path(__file__).resolve().parents[1] / "vectors" / "fcis-v2.json"
 
 
 def _vectors() -> dict[str, Any]:
@@ -17,7 +17,7 @@ def _vectors() -> dict[str, Any]:
 
 def test_python_canonical_codec_matches_shared_vectors() -> None:
     vectors = _vectors()
-    assert vectors["schema"] == "popperpad/fcis-vectors/v1"
+    assert vectors["schema"] == "popperpad/fcis-vectors/v2"
     for case in vectors["canonical_cases"]:
         encoded = canonical_json_bytes(case["value"])
         assert encoded.decode("utf-8") == case["canonical_utf8"], case["name"]

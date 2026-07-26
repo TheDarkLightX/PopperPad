@@ -8,9 +8,7 @@ from popperpad.refs import Ref
 
 
 def _ref_strategy():
-    return st.binary(min_size=32, max_size=32).map(
-        lambda value: Ref("sha256:" + value.hex())
-    )
+    return st.binary(min_size=32, max_size=32).map(lambda raw: Ref("sha256:" + raw.hex()))
 
 
 def _missing_ref(refs: tuple[Ref, ...]) -> Ref:

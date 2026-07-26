@@ -361,8 +361,15 @@ Run(counterexample, recipe, context) = FAILS_CLAIM
 }
 ```
 
-This is the sellable object. Payment funds its production; verifier acceptance
-makes it eligible for payout; PopperPad stores it as scientific memory.
+This is the sellable object. Payment funds its production; authenticated verifier
+acceptance makes it eligible for payout; PopperPad stores it as scientific memory.
+The `verifier_result.accepted` field is a claimed outcome, not authority by itself.
+A settlement transition also requires a content-addressed Ed25519 verifier receipt.
+Its signed statement binds the exact pre-state, market policy, bounty, claim, context,
+submission, recipe, evidence, artifacts, and outcome. The signing-key identity must
+be present in `accepted_verifier_refs`. PopperPad verifies that receipt in the pure
+market core before emitting payout or refund effects. Key custody, verifier
+execution, and governance of the accepted-key set remain outside the core.
 
 ### Submission
 

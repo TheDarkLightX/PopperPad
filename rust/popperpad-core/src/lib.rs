@@ -302,16 +302,34 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         blob_refs.push(reference);
     }
 
+    let mut intent_rows = Vec::with_capacity(input.outbox.len());
+    for effect in &input.outbox {
+        if effect.kind.is_empty() {
+            return Err(CoreError::InvalidEffect);
+        }
+        if !effect.payload.is_object() {
+            return Err(CoreError::InvalidObject);
+        }
+        canonical_object_bytes(&effect.payload)?;
+        intent_rows.push(json!({
+            "kind": effect.kind,
+            "payload": effect.payload,
+        }));
+    }
+
     let command_value = json!({
         "expected_head": input.expected_head,
+        "created_at": input.created_at,
+        "evidence_root": input.evidence_root,
         "objects": object_rows,
         "blobs": blob_rows,
+        "outbox": intent_rows,
         "policy_version": input.policy_version,
         "core_version": input.core_version,
     });
-    let command_hash = canonical_hash("commit-command/v1", &command_value)?;
+    let command_hash = canonical_hash("commit-command/v2", &command_value)?;
     let replay_id = canonical_hash(
-        "replay-id/v1",
+        "replay-id/v2",
         &json!({"pre_state_root": input.expected_head, "command_hash": command_hash}),
     )?;
 
@@ -326,7 +344,7 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         }
         canonical_object_bytes(&effect.payload)?;
         let effect_id = canonical_hash(
-            "outbox-effect-id/v1",
+            "outbox-effect-id/v2",
             &json!({
                 "replay_id": replay_id,
                 "index": index,
@@ -342,7 +360,7 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         effect_ids.push(effect_id);
     }
 
-    let effect_plan_hash = canonical_hash("effect-plan/v1", &Value::Array(effect_rows.clone()))?;
+    let effect_plan_hash = canonical_hash("effect-plan/v2", &Value::Array(effect_rows.clone()))?;
     let commit_value = json!({
         "expected_head": input.expected_head,
         "created_at": input.created_at,
@@ -354,9 +372,9 @@ pub fn plan_commit(input: &CommitInput) -> Result<CommitSummary, CoreError> {
         "policy_version": input.policy_version,
         "core_version": input.core_version,
     });
-    let commit_root = canonical_hash("commit-bundle/v1", &commit_value)?;
+    let commit_root = canonical_hash("commit-bundle/v2", &commit_value)?;
     let receipt = json!({
-        "version": "popperpad/receipt/v1",
+        "version": "popperpad/receipt/v2",
         "pre_state_root": input.expected_head,
         "command_hash": command_hash,
         "evidence_root": input.evidence_root,
@@ -445,14 +463,14 @@ mod tests {
     }
 
     fn vectors() -> VectorFile {
-        serde_json::from_str(include_str!("../../../vectors/fcis-v1.json"))
+        serde_json::from_str(include_str!("../../../vectors/fcis-v2.json"))
             .expect("shared FCIS vectors must parse")
     }
 
     #[test]
     fn canonical_vectors_match_python() {
         let vectors = vectors();
-        assert_eq!(vectors.schema, "popperpad/fcis-vectors/v1");
+        assert_eq!(vectors.schema, "popperpad/fcis-vectors/v2");
         for case in vectors.canonical_cases {
             let bytes = canonical_json_bytes(&case.value)
                 .unwrap_or_else(|error| panic!("{}: {error}", case.name));
@@ -540,6 +558,30 @@ mod tests {
             policy_version: default_policy_version(),
             core_version: default_core_version(),
         }
+    }
+
+    #[test]
+    fn replay_identity_binds_effects_evidence_and_commit_time() {
+        let mut baseline = minimal_commit_input();
+        baseline.evidence_root = format!("sha256:{}", "a".repeat(64));
+        baseline.outbox.push(OutboxInput {
+            kind: "notify".to_owned(),
+            payload: json!({"value": 1}),
+        });
+
+        let mut changed_effect = baseline.clone();
+        changed_effect.outbox[0].payload = json!({"value": 2});
+        let mut changed_evidence = baseline.clone();
+        changed_evidence.evidence_root = format!("sha256:{}", "b".repeat(64));
+        let mut changed_time = baseline.clone();
+        changed_time.created_at = "2026-07-24T00:00:01Z".to_owned();
+
+        let replay_ids: HashSet<String> =
+            [baseline, changed_effect, changed_evidence, changed_time]
+                .iter()
+                .map(|input| plan_commit(input).unwrap().replay_id)
+                .collect();
+        assert_eq!(replay_ids.len(), 4);
     }
 
     #[test]

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import fields, replace
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from popperpad.core.market import (
     REJECTION_PRECEDENCE,
@@ -12,6 +14,9 @@ from popperpad.core.market import (
     BountyTerms,
     CancelBounty,
     ChallengeStatus,
+    ChallengeVerifierStatement,
+    ChallengeVerdict,
+    MarketEvidence,
     MarketPolicy,
     OpenBounty,
     OpenChallenge,
@@ -19,17 +24,121 @@ from popperpad.core.market import (
     ResolveChallenge,
     SettleBounty,
     SubmissionStatus,
+    SubmissionVerifierStatement,
+    SubmissionVerdict,
     SubmitCandidate,
+    VerifierReceipt,
     VerifySubmission,
-    apply_market_command,
+    apply_market_command as apply_market_command_core,
     initial_bounty,
+    market_policy_hash,
+    market_state_hash,
+    verifier_receipt_ref,
+    verifier_statement_signing_bytes,
 )
 from popperpad.core.result import Accept, CommittedFailure, Reject
 from popperpad.core.values import Amount
+from popperpad.core.verifier import ed25519_verifier_ref
 
 
 def R(char: str) -> str:
     return "sha256:" + char * 64
+
+
+_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+_PUBLIC_KEY = _PRIVATE_KEY.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+VERIFIER_REF = ed25519_verifier_ref(_PUBLIC_KEY)
+
+
+def _sign_statement(
+    statement: SubmissionVerifierStatement | ChallengeVerifierStatement,
+) -> VerifierReceipt:
+    return VerifierReceipt(
+        statement=statement,
+        public_key=_PUBLIC_KEY,
+        signature=_PRIVATE_KEY.sign(verifier_statement_signing_bytes(statement)),
+    )
+
+
+def _evidence_for(
+    state: BountyState,
+    command: object,
+    market_policy: MarketPolicy,
+) -> tuple[object, MarketEvidence]:
+    if type(command) is VerifySubmission:
+        submission = next(
+            (item for item in state.submissions if item.submission_id == command.submission_id),
+            None,
+        )
+        if submission is None:
+            return command, MarketEvidence()
+        statement = SubmissionVerifierStatement(
+            pre_state_hash=market_state_hash(state),
+            policy_hash=market_policy_hash(market_policy),
+            bounty_id=state.terms.bounty_id,
+            claim_ref=state.terms.claim_ref,
+            context_ref=state.terms.context_ref,
+            submission_id=submission.submission_id,
+            recipe_ref=submission.recipe_ref,
+            evidence_refs=submission.evidence_refs,
+            artifact_refs=submission.artifact_refs,
+            outcome=(
+                SubmissionVerdict.ACCEPTED
+                if command.accepted
+                else SubmissionVerdict.REJECTED
+            ),
+        )
+        receipt = _sign_statement(statement)
+        return (
+            replace(command, verifier_receipt_ref=verifier_receipt_ref(receipt)),
+            MarketEvidence((receipt,)),
+        )
+    if type(command) is ResolveChallenge:
+        challenge = next(
+            (item for item in state.challenges if item.challenge_id == command.challenge_id),
+            None,
+        )
+        if challenge is None:
+            return command, MarketEvidence()
+        statement = ChallengeVerifierStatement(
+            pre_state_hash=market_state_hash(state),
+            policy_hash=market_policy_hash(market_policy),
+            bounty_id=state.terms.bounty_id,
+            claim_ref=state.terms.claim_ref,
+            context_ref=state.terms.context_ref,
+            challenge_id=challenge.challenge_id,
+            submission_id=challenge.submission_id,
+            finding_kind=challenge.finding_kind,
+            evidence_refs=challenge.evidence_refs,
+            outcome=(
+                ChallengeVerdict.UPHELD
+                if command.upheld
+                else ChallengeVerdict.REJECTED
+            ),
+        )
+        receipt = _sign_statement(statement)
+        return (
+            replace(command, verifier_receipt_ref=verifier_receipt_ref(receipt)),
+            MarketEvidence((receipt,)),
+        )
+    return command, MarketEvidence()
+
+
+def apply_market_command(
+    state: BountyState,
+    command: object,
+    market_policy: MarketPolicy,
+):
+    bound_command, evidence = _evidence_for(state, command, market_policy)
+    return apply_market_command_core(
+        state,
+        bound_command,  # type: ignore[arg-type]
+        market_policy,
+        evidence,
+    )
 
 
 def terms() -> BountyTerms:
@@ -43,7 +152,7 @@ def terms() -> BountyTerms:
         deadline_epoch_s=1_000,
         challenge_window_seconds=100,
         accepted_recipe_refs=frozenset({R("c")}),
-        accepted_verifier_refs=frozenset({R("d")}),
+        accepted_verifier_refs=frozenset({VERIFIER_REF}),
     )
 
 
@@ -84,7 +193,7 @@ def submitted_state() -> BountyState:
             submission_id="submission-1",
             submitter_ref="did:example:refuter",
             recipe_ref=R("c"),
-            verifier_ref=R("d"),
+            verifier_ref=VERIFIER_REF,
             evidence_refs=(R("e"),),
             artifact_refs=(R("f"),),
             bond=Amount(100),
@@ -102,7 +211,7 @@ def verified_state() -> BountyState:
         VerifySubmission(
             "cmd-verify",
             "submission-1",
-            R("d"),
+            VERIFIER_REF,
             R("1"),
             True,
             700,
@@ -130,7 +239,7 @@ def test_happy_path_is_exact_deterministic_and_conservative() -> None:
             "submission-1",
             "did:example:refuter",
             R("c"),
-            R("d"),
+            VERIFIER_REF,
             (R("e"),),
             (R("f"),),
             Amount(100),
@@ -143,7 +252,7 @@ def test_happy_path_is_exact_deterministic_and_conservative() -> None:
 
     verified = apply_market_command(
         submitted.next_state,
-        VerifySubmission("cmd-verify", "submission-1", R("d"), R("1"), True, 700),
+        VerifySubmission("cmd-verify", "submission-1", VERIFIER_REF, R("1"), True, 700),
         policy(),
     )
     assert isinstance(verified, Accept)
@@ -181,7 +290,7 @@ def test_happy_path_is_exact_deterministic_and_conservative() -> None:
 def test_honest_verifier_rejection_is_committed_failure_and_refunds_not_slashes() -> None:
     decision = apply_market_command(
         submitted_state(),
-        VerifySubmission("cmd-reject", "submission-1", R("d"), R("1"), False, 700),
+        VerifySubmission("cmd-reject", "submission-1", VERIFIER_REF, R("1"), False, 700),
         policy(),
     )
     assert isinstance(decision, CommittedFailure)
@@ -190,6 +299,204 @@ def test_honest_verifier_rejection_is_committed_failure_and_refunds_not_slashes(
     assert decision.next_state.submissions[0].bond_locked == Amount.zero()
     assert [effect.kind for effect in decision.effects] == ["refund_submission_bond"]
     assert all("slash" not in effect.kind for effect in decision.effects)
+
+
+def test_shape_valid_receipt_reference_cannot_authorize_verifier_outcome() -> None:
+    decision = apply_market_command_core(
+        submitted_state(),
+        VerifySubmission(
+            "cmd-forged-verdict",
+            "submission-1",
+            VERIFIER_REF,
+            R("9"),
+            True,
+            700,
+        ),
+        policy(),
+        MarketEvidence(),
+    )
+    assert isinstance(decision, Reject)
+    assert decision.code in {"INVALID_EVIDENCE", "MISSING_EVIDENCE"}
+
+
+def test_invalid_verifier_signature_is_rejected_before_state_change() -> None:
+    state = submitted_state()
+    command, evidence = _evidence_for(
+        state,
+        VerifySubmission(
+            "cmd-invalid-signature",
+            "submission-1",
+            VERIFIER_REF,
+            R("1"),
+            True,
+            700,
+        ),
+        policy(),
+    )
+    assert type(command) is VerifySubmission
+    receipt = evidence.verifier_receipts[0]
+    tampered = replace(receipt, signature=b"\x00" * 64)
+    command = replace(command, verifier_receipt_ref=verifier_receipt_ref(tampered))
+
+    decision = apply_market_command_core(
+        state,
+        command,
+        policy(),
+        MarketEvidence((tampered,)),
+    )
+    assert isinstance(decision, Reject)
+    assert decision.code == "INVALID_EVIDENCE"
+    assert state.submissions[0].status is SubmissionStatus.PENDING
+
+
+def test_invalid_signature_precedes_duplicate_command_and_wrong_phase() -> None:
+    state = submitted_state()
+    command, evidence = _evidence_for(
+        state,
+        VerifySubmission(
+            "cmd-invalid-evidence-precedence",
+            "submission-1",
+            VERIFIER_REF,
+            R("1"),
+            True,
+            700,
+        ),
+        policy(),
+    )
+    assert type(command) is VerifySubmission
+    receipt = evidence.verifier_receipts[0]
+    tampered = replace(receipt, signature=b"\x00" * 64)
+    bound_command = replace(
+        command,
+        verifier_receipt_ref=verifier_receipt_ref(tampered),
+    )
+    invalid_evidence = MarketEvidence((tampered,))
+
+    duplicate_state = replace(
+        state,
+        processed_command_ids=state.processed_command_ids
+        | frozenset({bound_command.command_id}),
+    )
+    for pre_state in (duplicate_state, initial_bounty(terms())):
+        decision = apply_market_command_core(
+            pre_state,
+            bound_command,
+            policy(),
+            invalid_evidence,
+        )
+        assert isinstance(decision, Reject)
+        assert decision.code == "INVALID_EVIDENCE"
+
+
+def test_signed_binding_mismatch_precedes_duplicate_command_and_wrong_phase() -> None:
+    state = submitted_state()
+    command = VerifySubmission(
+        "cmd-invalid-binding-precedence",
+        "submission-1",
+        VERIFIER_REF,
+        R("1"),
+        True,
+        700,
+    )
+    bound_command, evidence = _evidence_for(state, command, policy())
+    assert type(bound_command) is VerifySubmission
+    duplicate_state = replace(
+        state,
+        processed_command_ids=state.processed_command_ids
+        | frozenset({bound_command.command_id}),
+    )
+
+    for pre_state in (duplicate_state, initial_bounty(terms())):
+        decision = apply_market_command_core(
+            pre_state,
+            bound_command,
+            policy(),
+            evidence,
+        )
+        assert isinstance(decision, Reject)
+        assert decision.code == "INVALID_EVIDENCE"
+
+    policy_bound_command, policy_evidence = _evidence_for(
+        duplicate_state, command, policy()
+    )
+    assert type(policy_bound_command) is VerifySubmission
+    changed_policy = replace(policy(), version="popperpad/market-policy/v2")
+    policy_decision = apply_market_command_core(
+        duplicate_state,
+        policy_bound_command,
+        changed_policy,
+        policy_evidence,
+    )
+    assert isinstance(policy_decision, Reject)
+    assert policy_decision.code == "INVALID_EVIDENCE"
+
+
+def test_missing_receipt_preserves_duplicate_and_phase_precedence() -> None:
+    state = submitted_state()
+    command = VerifySubmission(
+        "cmd-missing-evidence-precedence",
+        "submission-1",
+        VERIFIER_REF,
+        R("9"),
+        True,
+        700,
+    )
+    duplicate_state = replace(
+        state,
+        processed_command_ids=state.processed_command_ids
+        | frozenset({command.command_id}),
+    )
+    duplicate = apply_market_command_core(
+        duplicate_state, command, policy(), MarketEvidence()
+    )
+    assert isinstance(duplicate, Reject)
+    assert duplicate.code == "DUPLICATE_COMMAND"
+
+    wrong_phase = apply_market_command_core(
+        initial_bounty(terms()), command, policy(), MarketEvidence()
+    )
+    assert isinstance(wrong_phase, Reject)
+    assert wrong_phase.code == "WRONG_PHASE"
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        {"pre_state_hash": R("8")},
+        {"policy_hash": R("7")},
+        {"submission_id": "another-submission"},
+        {"outcome": SubmissionVerdict.REJECTED},
+    ),
+)
+def test_signed_verifier_statement_must_bind_exact_candidate(change: dict[str, object]) -> None:
+    state = submitted_state()
+    command, evidence = _evidence_for(
+        state,
+        VerifySubmission(
+            "cmd-wrong-binding",
+            "submission-1",
+            VERIFIER_REF,
+            R("1"),
+            True,
+            700,
+        ),
+        policy(),
+    )
+    assert type(command) is VerifySubmission
+    statement = evidence.verifier_receipts[0].statement
+    assert type(statement) is SubmissionVerifierStatement
+    mismatched = _sign_statement(replace(statement, **change))
+    command = replace(command, verifier_receipt_ref=verifier_receipt_ref(mismatched))
+
+    decision = apply_market_command_core(
+        state,
+        command,
+        policy(),
+        MarketEvidence((mismatched,)),
+    )
+    assert isinstance(decision, Reject)
+    assert decision.code == "INVALID_EVIDENCE"
+    assert state.submissions[0].status is SubmissionStatus.PENDING
 
 
 def test_upheld_protocol_challenge_slashes_only_declared_misconduct() -> None:
@@ -213,7 +520,7 @@ def test_upheld_protocol_challenge_slashes_only_declared_misconduct() -> None:
         ResolveChallenge(
             "cmd-resolve",
             "challenge-1",
-            R("d"),
+            VERIFIER_REF,
             R("3"),
             True,
             850,
@@ -227,6 +534,49 @@ def test_upheld_protocol_challenge_slashes_only_declared_misconduct() -> None:
     ]
     assert resolved.next_state.submissions[0].status is SubmissionStatus.REJECTED
     assert resolved.next_state.submissions[0].bond_locked == Amount.zero()
+
+
+def test_signed_challenge_binding_mismatch_precedes_duplicate_and_phase() -> None:
+    challenged = apply_market_command(
+        verified_state(),
+        OpenChallenge(
+            "cmd-challenge-precedence",
+            "challenge-precedence",
+            "submission-1",
+            "did:example:challenger",
+            "invalid_signature",
+            (R("2"),),
+            Amount(50),
+            800,
+        ),
+        policy(),
+    )
+    assert isinstance(challenged, Accept)
+    command = ResolveChallenge(
+        "cmd-resolve-precedence",
+        "challenge-precedence",
+        VERIFIER_REF,
+        R("3"),
+        True,
+        850,
+    )
+    bound_command, evidence = _evidence_for(
+        challenged.next_state, command, policy()
+    )
+    assert type(bound_command) is ResolveChallenge
+    duplicate_state = replace(
+        challenged.next_state,
+        processed_command_ids=challenged.next_state.processed_command_ids
+        | frozenset({bound_command.command_id}),
+    )
+
+    for pre_state in (duplicate_state, initial_bounty(terms())):
+        decision = apply_market_command_core(
+            pre_state, bound_command, policy(), evidence
+        )
+        assert isinstance(decision, Reject)
+        assert decision.code == "INVALID_EVIDENCE"
+
 
 
 def test_rejected_challenge_is_committed_failure_and_slashes_challenger_deposit() -> None:
@@ -247,7 +597,7 @@ def test_rejected_challenge_is_committed_failure_and_slashes_challenger_deposit(
     assert isinstance(challenged, Accept)
     resolved = apply_market_command(
         challenged.next_state,
-        ResolveChallenge("cmd-resolve", "challenge-1", R("d"), R("3"), False, 850),
+        ResolveChallenge("cmd-resolve", "challenge-1", VERIFIER_REF, R("3"), False, 850),
         policy(),
     )
     assert isinstance(resolved, CommittedFailure)
@@ -277,7 +627,7 @@ def test_timely_challenge_can_be_resolved_after_window_then_bounty_advances() ->
         ResolveChallenge(
             "cmd-resolve-after-window",
             "challenge-at-deadline",
-            R("d"),
+            VERIFIER_REF,
             R("3"),
             False,
             1_200,
@@ -338,7 +688,7 @@ def test_abandoned_challenge_defaults_after_bounded_adjudication_period() -> Non
         ResolveChallenge(
             "cmd-late-resolution",
             "abandoned-challenge",
-            R("d"),
+            VERIFIER_REF,
             R("3"),
             True,
             1_201,
@@ -353,7 +703,7 @@ def test_no_payable_submission_expires_and_refunds_all_locked_value() -> None:
     state = submitted_state()
     rejected = apply_market_command(
         state,
-        VerifySubmission("cmd-reject", "submission-1", R("d"), R("1"), False, 700),
+        VerifySubmission("cmd-reject", "submission-1", VERIFIER_REF, R("1"), False, 700),
         policy(),
     )
     assert isinstance(rejected, CommittedFailure)
@@ -382,10 +732,11 @@ def test_cancel_before_activity_refunds_escrow() -> None:
 
 
 def test_rejection_precedence_is_stable_and_rejects_without_state_or_effects() -> None:
-    assert REJECTION_PRECEDENCE[:6] == (
+    assert REJECTION_PRECEDENCE[:7] == (
         "INVALID_STATE",
         "INVALID_POLICY",
         "INVALID_COMMAND",
+        "INVALID_EVIDENCE",
         "DUPLICATE_COMMAND",
         "WRONG_PHASE",
         "TIME_WINDOW",
@@ -395,7 +746,7 @@ def test_rejection_precedence_is_stable_and_rejects_without_state_or_effects() -
         submission_id="submission-1",
         submitter_ref="did:example:refuter",
         recipe_ref=R("c"),
-        verifier_ref=R("d"),
+        verifier_ref=VERIFIER_REF,
         evidence_refs=(),
         artifact_refs=(),
         bond=Amount.zero(),
@@ -423,7 +774,7 @@ def test_unsupported_command_type_returns_typed_rejection() -> None:
     "command",
     (
         OpenBounty(1, "did:example:sponsor", Amount(1_000), 100),  # type: ignore[arg-type]
-        VerifySubmission("cmd", "submission-1", R("d"), R("1"), 1, 700),  # type: ignore[arg-type]
+        VerifySubmission("cmd", "submission-1", VERIFIER_REF, R("1"), 1, 700),  # type: ignore[arg-type]
         SettleBounty("cmd", "chain:tx:1", ("not-a-payout",), 1_200),  # type: ignore[arg-type]
     ),
 )
@@ -520,7 +871,7 @@ def test_market_state_cannot_represent_scientific_truth() -> None:
 
 def test_constructor_and_transition_own_collection_inputs() -> None:
     recipes = {R("c")}
-    verifiers = {R("d")}
+    verifiers = {VERIFIER_REF}
     source_terms = BountyTerms(
         bounty_id="bounty-owned",
         sponsor_ref="did:example:sponsor",
@@ -537,7 +888,7 @@ def test_constructor_and_transition_own_collection_inputs() -> None:
     recipes.add(R("e"))
     verifiers.add(R("f"))
     assert state.terms.accepted_recipe_refs == frozenset({R("c")})
-    assert state.terms.accepted_verifier_refs == frozenset({R("d")})
+    assert state.terms.accepted_verifier_refs == frozenset({VERIFIER_REF})
 
 
 def test_market_constructor_rejects_mutable_collection_aliases() -> None:
@@ -547,7 +898,7 @@ def test_market_constructor_rejects_mutable_collection_aliases() -> None:
             submission_id="submission-mutable",
             submitter_ref="did:example:refuter",
             recipe_ref=R("c"),
-            verifier_ref=R("d"),
+            verifier_ref=VERIFIER_REF,
             evidence_refs=[R("e")],
             artifact_refs=(),
             bond=Amount(100),
@@ -567,7 +918,7 @@ def test_terms_reject_illegal_states_at_construction() -> None:
             deadline_epoch_s=100,
             challenge_window_seconds=10,
             accepted_recipe_refs=frozenset({R("c")}),
-            accepted_verifier_refs=frozenset({R("d")}),
+            accepted_verifier_refs=frozenset({VERIFIER_REF}),
         )
 
 

@@ -9,8 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from .canonical import canonical_hash, canonical_json_bytes, stable_sha256
-from .refs import REF_RE, require
+from .canonical import canonical_json_bytes, stable_sha256
+from .core.commit import CommitBundle, validate_commit_bundle, validate_commit_record
+from .core.result import Reject
+from .core.values import thaw_json
+from .refs import REF_RE, ValidationError, require
 
 
 _LOG_SCHEMA_V1 = "popperpad/log_record/v1"
@@ -158,28 +161,26 @@ class AppendOnlyLog:
             self._append_line_atomically_unlocked(full)
             return AppendResult(record_hash=record_hash)
 
-    def append_prepared(self, record: Mapping[str, Any], *, expected_head: str) -> AppendResult:
-        """Atomically publish one precomputed v2 commit if its snapshot is current."""
+    def append_prepared(self, planned: CommitBundle, *, expected_head: str) -> AppendResult:
+        """Publish one semantically validated receipt-v2 bundle by compare-and-swap."""
 
-        full = dict(record)
-        require(full.get("schema") == _LOG_SCHEMA_V2, f"prepared record schema must be {_LOG_SCHEMA_V2}")
-        require(full.get("op") == "commit_bundle", "prepared record op must be commit_bundle")
-        require(str(full.get("prev_record_hash", "")) == expected_head, "prepared record is bound to another head")
-        record_hash = full.get("record_hash")
+        if type(planned) is not CommitBundle:
+            raise TypeError("prepared publication requires a CommitBundle")
+        validated = validate_commit_bundle(planned)
+        if isinstance(validated, Reject):
+            raise ValueError(f"{validated.code}: {thaw_json(validated.details)}")
         require(
-            isinstance(record_hash, str) and bool(REF_RE.fullmatch(record_hash)),
-            "prepared record_hash must be sha256:<64hex>",
+            validated.expected_head == expected_head,
+            "prepared record is bound to another head",
         )
-        require(
-            canonical_hash("log-record/v2", _strip_record_hash(full)) == record_hash,
-            "prepared record_hash mismatch",
-        )
+        full = thaw_json(validated.record)
+        require(isinstance(full, Mapping), "validated record must be an object")
 
         with self._lock():
             current_head = self._head_unlocked()
             require(current_head == expected_head, "commit conflict: authoritative log head changed")
             self._append_line_atomically_unlocked(full)
-        return AppendResult(record_hash=record_hash)
+        return AppendResult(record_hash=validated.record_hash)
 
     def _append_line_atomically_unlocked(self, obj: Mapping[str, Any]) -> None:
         existing = self.path.read_bytes() if self.path.exists() else b""
@@ -256,13 +257,23 @@ class AppendOnlyLog:
                 str(record.get("prev_record_hash", "")) == previous,
                 f"log corruption: prev_record_hash mismatch at line {index}",
             )
-            core = _strip_record_hash(record)
-            expected = (
-                stable_sha256(core)
-                if schema == _LOG_SCHEMA_V1
-                else canonical_hash("log-record/v2", core)
-            )
-            require(expected == record_hash, f"log corruption: record_hash mismatch at line {index}")
+            if schema == _LOG_SCHEMA_V1:
+                expected = stable_sha256(_strip_record_hash(record))
+                require(
+                    expected == record_hash,
+                    f"log corruption: record_hash mismatch at line {index}",
+                )
+            else:
+                validated = validate_commit_record(record, allow_legacy_receipt=True)
+                if isinstance(validated, Reject):
+                    raise ValidationError(
+                        f"log corruption: record_hash mismatch ({validated.code}) at line {index}: "
+                        f"{thaw_json(validated.details)}"
+                    )
+                require(
+                    validated.record_hash == record_hash,
+                    f"log corruption: record_hash mismatch at line {index}",
+                )
             previous = record_hash
 
     def stats(self) -> dict[str, Any]:
