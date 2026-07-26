@@ -4,8 +4,8 @@ Status: completed repair audit for the bounded market adapter.
 
 Review endpoints:
 
-- base: `8478691f41fb73bec9db50237527721659100118`
-- bound source revision: `0adb3878667d507e5af7ccbb1902002d6f5550af`
+- base: `a297f376323808dc5acbc1e47d50bc607531c15e`
+- bound source revision: `274ea6c571e6f82cee6df9ead890f7bc5b05e350`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -37,7 +37,9 @@ Files in the repair scope:
 - `src/popperpad/shells/data_adapter_jsonl.py`
 - their focused tests and package metadata
 
-The existing market core, commit bundle, CAS log, and outbox remain unchanged.
+The authority-receipt market core and exact commit-publication changes are
+inherited from current `main` through PR #21. This bounded repair adapts to that
+authority boundary without further core mutation.
 
 ## Construction, semantics, and failure model
 
@@ -92,6 +94,12 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
 13. Finite enumeration enforces `max_states` before admitting each new
     successor, so the advertised bound cannot be exceeded by one branching
     expansion.
+14. Verifier-authority commands accept one exact caller-supplied Ed25519
+    receipt, derive its content reference from canonical bytes, and pass the
+    immutable evidence to the market core for signature and statement checks.
+15. Enumeration binds receipt-bearing commands into request and corpus hashes,
+    refuses `search_complete` without an external receipt provider, and aborts
+    if that provider supplies missing or inadmissible evidence.
 
 ## Completed evidence
 
@@ -104,11 +112,14 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
   commitments, and oversized-line recovery.
 - Profile-shift, state-budget, and malformed-collection regressions cover
   enumeration inputs, resource bounds, and total-transition behavior.
+- Missing-receipt, tampered-signature, unknown-field, provider-free, and
+  invalid-provider regressions cover the verifier authority boundary and honest
+  finite-search completeness.
 - Terminal-state, chunk-boundary, and manifest-schema regressions cover the
   final fail-closed integrity cases.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 408 tests.
-- Rust formatting and strict clippy pass; all 13 Rust tests pass.
+- The complete local Python suite passes: 428 tests.
+- Rust formatting and strict clippy pass; all 14 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the
   pre-request boundary schema without request identity.
@@ -122,3 +133,8 @@ correctness, unbounded liveness or fairness, verifier semantic correctness,
 hostile-recipe sandboxing, authenticated federation, datastore
 linearizability, blockchain refinement, or release readiness for public
 untrusted workloads. Those remain separate promotion gates.
+
+The packaged single-slot profile's accepted verifier reference is a public
+model fixture. Its private key appears only in regression tests and supplies no
+production trust. Deployments must bind their own accepted keys and external
+receipt provider.
