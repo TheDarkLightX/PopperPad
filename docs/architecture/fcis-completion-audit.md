@@ -5,7 +5,7 @@ Status: completed local repair audit for the bounded market adapter; hosted prom
 Review endpoints:
 
 - base: `a297f376323808dc5acbc1e47d50bc607531c15e`
-- bound source revision: `8c4ccb27d9ee4dd5a069a182167b47c1e00ad592`
+- bound source revision: `55033f82daf4c65ee2716dbb07d4610e704713da`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
