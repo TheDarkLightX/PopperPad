@@ -69,7 +69,8 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
 3. `load_source_manifest` verifies every declared digest against live source
    bytes in both source-checkout and installed-wheel layouts.
 4. Float and non-finite JSON failures retain typed codes. The persistent shell
-   bounds acquisition, drains an oversized line, and recovers for the next
+   bounds acquisition, responds to blank records, excludes JSONL delimiters
+   from input commitments, drains an oversized line, and recovers for the next
    request.
 5. `EnumerationResult` is frozen, slotted, deeply immutable, and stores reject
    reasons in `FrozenDict`.
@@ -77,6 +78,11 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
    request IDs, state hashes, or request commitments.
 7. Profile and source-manifest codec claims are closed to the canonical codec,
    and validation operations require a null command.
+8. Enumeration reads every time representative from the supplied profile and
+   aborts on any unexpected `INVALID_INPUT`, so an invalid corpus cannot be
+   labeled complete.
+9. Structural collection violations stop later semantic iteration, preserving
+   the market transition's total rejection contract for malformed values.
 
 ## Completed evidence
 
@@ -85,10 +91,12 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
 - Tamper, missing-file, packaged-resource, and isolated-wheel checks cover the
   source manifest and runtime binding.
 - Boundary tests cover invalid UTF-8, duplicate keys, floats, non-finite
-  values, noncanonical encodings, exact input-byte commitments, and oversized
-  line recovery.
+  values, noncanonical encodings, blank records, framing-independent input-byte
+  commitments, and oversized-line recovery.
+- Profile-shift and malformed-collection regressions cover enumeration inputs
+  and total-transition behavior.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 395 tests.
+- The complete local Python suite passes: 398 tests.
 - Rust formatting and strict clippy pass; all 13 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the

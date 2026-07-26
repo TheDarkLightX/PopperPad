@@ -44,7 +44,7 @@ from .finite_state import (
     TimeClass,
     initial_abstract_state,
 )
-from .market_adapter import apply_data_adapter, abstract_state_hash
+from .market_adapter import apply_data_adapter, abstract_state_hash, parse_market_profile
 
 
 CORPUS_DOMAIN = "popperpad-enumeration-corpus/v1"
@@ -77,6 +77,8 @@ def enumerate_all_transitions(
     max_states: int = 10000,
 ) -> EnumerationResult:
     """Deterministic BFS over all reachable states × commands × time classes."""
+
+    market_profile = parse_market_profile(profile.semantic_profile)
 
     visited: set[str] = set()
     queue: deque[SingleSlotAbstractState] = deque()
@@ -113,7 +115,7 @@ def enumerate_all_transitions(
 
         for cmd in command_variants:
             for tc in time_classes:
-                now = _time_for_class(tc)
+                now = _time_for_class(market_profile.time_representatives, tc)
                 request = AdapterRequest(
                     schema="popperpad/data-adapter-request/v1",
                     protocol_version="v1",
@@ -167,6 +169,11 @@ def enumerate_all_transitions(
                     reject_count += 1
                     reason = response.reason_code or "unknown"
                     reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
+                elif response.decision_kind is AdapterDecisionKind.INVALID_INPUT:
+                    raise RuntimeError(
+                        "enumeration produced INVALID_INPUT for an admitted case: "
+                        f"{response.reason_code}: {response.reason_details}"
+                    )
 
     corpus_hash = canonical_hash(CORPUS_DOMAIN, tuple(corpus_entries))
 
@@ -188,14 +195,13 @@ def enumerate_all_transitions(
     )
 
 
-def _time_for_class(tc: TimeClass) -> int:
-    """Default time representatives — must match the profile."""
+def _time_for_class(
+    time_representatives: FrozenDict[JsonValue],
+    tc: TimeClass,
+) -> int:
+    """Return the exact epoch committed by the supplied semantic profile."""
 
-    defaults = {
-        TimeClass.PRE_DEADLINE: 100,
-        TimeClass.AT_DEADLINE: 1000,
-        TimeClass.CHALLENGE_WINDOW: 1050,
-        TimeClass.POST_CHALLENGE_WINDOW: 1101,
-        TimeClass.POST_RESOLUTION_DEADLINE: 1200,
-    }
-    return defaults[tc]
+    value = time_representatives.get(tc.value)
+    if type(value) is not int or isinstance(value, bool) or value < 0:
+        raise ValueError(f"invalid or missing time representative for {tc.value}")
+    return value

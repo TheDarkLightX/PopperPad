@@ -677,3 +677,17 @@ def test_market_state_rejects_payable_ids_outside_payable_lifecycle() -> None:
     assert isinstance(payable_decision, Reject)
     assert payable_decision.code == "INVALID_STATE"
     assert "payable_without_submission" in payable_decision.details["reason"]
+
+
+def test_market_state_rejects_non_iterable_payable_ids_without_raising() -> None:
+    malformed = replace(verified_state(), payable_submission_ids=None)
+
+    decision = apply_market_command(
+        malformed,
+        AdvanceBounty("cmd-non-iterable-payable-ids", 1_101),
+        policy(),
+    )
+
+    assert isinstance(decision, Reject)
+    assert decision.code == "INVALID_STATE"
+    assert "payable_ids_format" in decision.details["reason"]

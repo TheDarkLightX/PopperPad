@@ -41,7 +41,7 @@ from popperpad.core.adapter_protocol import (
 )
 from popperpad.core.codec import sha256_bytes
 from popperpad.core.market_invariants import market_state_violations, MarketStateViolationCode
-from popperpad.core.values import FrozenDict, freeze_json
+from popperpad.core.values import FrozenDict, freeze_json, thaw_json
 from popperpad.refinement.finite_state import (
     AbstractChallengeStatus,
     AbstractCommandKind,
@@ -949,3 +949,27 @@ def test_enumeration_covers_all_command_variants(profile, binding) -> None:
     result = enumerate_all_transitions(profile, binding)
     assert result.command_variants == 10
     assert result.time_classes == 5
+
+
+def test_enumeration_uses_supplied_profile_time_representatives(profile, binding) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    semantic = thaw_json(profile.semantic_profile)
+    assert isinstance(semantic, dict)
+    semantic["time_representatives"] = {
+        "pre_deadline": 101,
+        "at_deadline": 1001,
+        "challenge_window": 1051,
+        "post_challenge_window": 1102,
+        "post_resolution_deadline": 1201,
+    }
+    shifted_semantic = freeze_json(semantic)
+    assert isinstance(shifted_semantic, FrozenDict)
+    shifted_profile = replace(profile, semantic_profile=shifted_semantic)
+    shifted_binding = replace(binding, profile_hash=shifted_profile.hash())
+
+    result = enumerate_all_transitions(shifted_profile, shifted_binding)
+
+    assert result.search_complete is True
+    assert result.reachable_states > 1
+    assert result.accept_count > 0

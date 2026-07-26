@@ -445,8 +445,13 @@ def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
         if len(line) > MAX_REQUEST_BYTES and not line.endswith((b"\n", b"\r")):
             digest = hashlib.sha256()
             digest.update(line)
-            while line and not line.endswith((b"\n", b"\r")):
+            while True:
                 line = stdin.readline(MAX_REQUEST_BYTES + 2)
+                if not line:
+                    break
+                if line.endswith((b"\n", b"\r")):
+                    digest.update(line.rstrip(b"\n\r"))
+                    break
                 digest.update(line)
             response_bytes = _invalid_input_bytes(
                 binding,
@@ -460,8 +465,6 @@ def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
             stdout.flush()
             continue
         payload = line.rstrip(b"\n\r")
-        if not payload:
-            continue
         response_bytes = process_line(payload, profile, binding)
         stdout.write(response_bytes)
         stdout.write(b"\n")

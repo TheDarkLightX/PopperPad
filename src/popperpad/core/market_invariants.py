@@ -252,6 +252,8 @@ def market_state_violations(value: object) -> tuple[MarketStateViolation, ...]:
     if violations:
         return tuple(violations)
     _check_collection_fields(state, violations)
+    if violations:
+        return tuple(violations)
     _check_uniqueness(state, violations)
     _check_references(state, violations)
     _check_payable(state, violations)
