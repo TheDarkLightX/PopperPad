@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `a297f376323808dc5acbc1e47d50bc607531c15e`
-- bound source revision: `805826fed94407b8584d213cf140610aa4739f16`
+- bound source revision: `3992a06b3697c124ab8c3473b3c4da0e42c65e9e`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -106,6 +106,9 @@ authority boundary without further core mutation.
 17. Oversized-record hashing preserves a pending trailing CR across chunks and
     excludes it only when the next chunk begins with LF, making CRLF delimiter
     stripping independent of chunk placement.
+18. JSON integer-decoder `ValueError` failures become committed typed boundary
+    responses, so an adversarial integer literal cannot terminate the
+    persistent JSONL shell.
 
 ## Completed evidence
 
@@ -125,8 +128,10 @@ authority boundary without further core mutation.
   final fail-closed integrity cases.
 - A split-CRLF chunk-edge regression proves the oversized input hash excludes
   both delimiter bytes and the shell recovers for the next request.
+- A 5,000-digit integer regression proves decoder-limit failures remain
+  committed to the input bytes and the following JSONL request still executes.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 429 tests.
+- The complete local Python suite passes: 430 tests.
 - Rust formatting and strict clippy pass; all 14 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the
