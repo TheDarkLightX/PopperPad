@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `8478691f41fb73bec9db50237527721659100118`
-- bound source revision: `c13d3052a4839ef2b4ec23e04a3f3e438dc99f3b`
+- bound source revision: `4d5d71ffe0137202ed069aa666eca48cb8651821`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
