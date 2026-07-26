@@ -982,6 +982,28 @@ def test_complete_enumeration_search_completes(profile, binding) -> None:
         result.reject_reasons["mutated"] = 1
 
 
+def test_enumeration_enforces_state_budget_per_successor(profile, binding) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    result = enumerate_all_transitions(profile, binding, max_states=3)
+
+    assert result.reachable_states == 3
+    assert result.search_complete is False
+    assert result.budget_exhausted is True
+
+
+@pytest.mark.parametrize("max_states", [0, -1, True, 3.5])
+def test_enumeration_rejects_invalid_state_budgets(
+    profile,
+    binding,
+    max_states,
+) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    with pytest.raises(ValueError, match="max_states must be a positive integer"):
+        enumerate_all_transitions(profile, binding, max_states=max_states)
+
+
 def test_enumeration_corpus_hash_is_deterministic(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 

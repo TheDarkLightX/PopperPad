@@ -78,6 +78,9 @@ def enumerate_all_transitions(
 ) -> EnumerationResult:
     """Deterministic BFS over all reachable states × commands × time classes."""
 
+    if type(max_states) is not int or max_states < 1:
+        raise ValueError("max_states must be a positive integer")
+
     market_profile = parse_market_profile(profile.semantic_profile)
 
     visited: set[str] = set()
@@ -107,9 +110,6 @@ def enumerate_all_transitions(
     budget_exhausted = False
 
     while queue:
-        if len(visited) >= max_states:
-            budget_exhausted = True
-            break
         state = queue.popleft()
         state_hash = abstract_state_hash(state)
 
@@ -149,22 +149,15 @@ def enumerate_all_transitions(
                 assert isinstance(entry, FrozenDict)
                 corpus_entries.append(entry)
 
+                successor_hash: str | None = None
                 if response.decision_kind is AdapterDecisionKind.ACCEPT:
                     accept_count += 1
                     enabled_transitions += 1
-                    post_hash = response.post_state_hash
-                    if post_hash and post_hash not in visited:
-                        visited.add(post_hash)
-                        post_state = SingleSlotAbstractState.from_json(response.post_state)
-                        queue.append(post_state)
+                    successor_hash = response.post_state_hash
                 elif response.decision_kind is AdapterDecisionKind.COMMITTED_FAILURE:
                     committed_failure_count += 1
                     enabled_transitions += 1
-                    post_hash = response.post_state_hash
-                    if post_hash and post_hash not in visited:
-                        visited.add(post_hash)
-                        post_state = SingleSlotAbstractState.from_json(response.post_state)
-                        queue.append(post_state)
+                    successor_hash = response.post_state_hash
                 elif response.decision_kind is AdapterDecisionKind.REJECT:
                     reject_count += 1
                     reason = response.reason_code or "unknown"
@@ -174,6 +167,20 @@ def enumerate_all_transitions(
                         "enumeration produced INVALID_INPUT for an admitted case: "
                         f"{response.reason_code}: {response.reason_details}"
                     )
+
+                if successor_hash and successor_hash not in visited:
+                    if len(visited) >= max_states:
+                        budget_exhausted = True
+                        break
+                    visited.add(successor_hash)
+                    post_state = SingleSlotAbstractState.from_json(response.post_state)
+                    queue.append(post_state)
+
+            if budget_exhausted:
+                break
+
+        if budget_exhausted:
+            break
 
     corpus_hash = canonical_hash(CORPUS_DOMAIN, tuple(corpus_entries))
 
