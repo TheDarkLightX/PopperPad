@@ -25,6 +25,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from popperpad.core.adapter_protocol import (
     ADAPTER_PROTOCOL_VERSION,
@@ -41,8 +43,20 @@ from popperpad.core.adapter_protocol import (
     SourceManifest,
 )
 from popperpad.core.codec import sha256_bytes
+from popperpad.core.market import (
+    ChallengeVerifierStatement,
+    ChallengeVerdict,
+    SubmissionVerifierStatement,
+    SubmissionVerdict,
+    VerifierReceipt,
+    market_policy_hash,
+    market_state_hash,
+    verifier_receipt_json,
+    verifier_statement_signing_bytes,
+)
 from popperpad.core.market_invariants import market_state_violations, MarketStateViolationCode
 from popperpad.core.values import FrozenDict, freeze_json, thaw_json
+from popperpad.core.verifier import ed25519_verifier_ref
 from popperpad.refinement.finite_state import (
     AbstractChallengeStatus,
     AbstractCommandKind,
@@ -90,6 +104,84 @@ def market(profile):
     return parse_market_profile(profile.semantic_profile)
 
 
+_TEST_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+_TEST_PUBLIC_KEY = _TEST_PRIVATE_KEY.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+
+
+def _model_receipt_provider(market, abstract, cmd) -> FrozenDict:
+    if ed25519_verifier_ref(_TEST_PUBLIC_KEY) != market.verifier_ref:
+        raise AssertionError("model receipt key does not match bound profile")
+    concrete = concretize_state(market, abstract)
+    if cmd.kind is AbstractCommandKind.VERIFY_SUBMISSION:
+        submission = next(iter(concrete.submissions), None)
+        statement = SubmissionVerifierStatement(
+            pre_state_hash=market_state_hash(concrete),
+            policy_hash=market_policy_hash(market.policy),
+            bounty_id=concrete.terms.bounty_id,
+            claim_ref=concrete.terms.claim_ref,
+            context_ref=concrete.terms.context_ref,
+            submission_id=(
+                submission.submission_id if submission is not None else market.submission_id
+            ),
+            recipe_ref=(submission.recipe_ref if submission is not None else market.recipe_ref),
+            evidence_refs=(
+                submission.evidence_refs if submission is not None else market.evidence_refs
+            ),
+            artifact_refs=(
+                submission.artifact_refs if submission is not None else market.artifact_refs
+            ),
+            outcome=(
+                SubmissionVerdict.ACCEPTED
+                if cmd.accepted
+                else SubmissionVerdict.REJECTED
+            ),
+        )
+    elif cmd.kind is AbstractCommandKind.RESOLVE_CHALLENGE:
+        challenge = next(iter(concrete.challenges), None)
+        statement = ChallengeVerifierStatement(
+            pre_state_hash=market_state_hash(concrete),
+            policy_hash=market_policy_hash(market.policy),
+            bounty_id=concrete.terms.bounty_id,
+            claim_ref=concrete.terms.claim_ref,
+            context_ref=concrete.terms.context_ref,
+            challenge_id=(
+                challenge.challenge_id if challenge is not None else market.challenge_id
+            ),
+            submission_id=(
+                challenge.submission_id if challenge is not None else market.submission_id
+            ),
+            finding_kind=(
+                challenge.finding_kind if challenge is not None else "invalid_signature"
+            ),
+            evidence_refs=(
+                challenge.evidence_refs
+                if challenge is not None
+                else market.challenge_evidence_refs
+            ),
+            outcome=(ChallengeVerdict.UPHELD if cmd.upheld else ChallengeVerdict.REJECTED),
+        )
+    else:
+        raise ValueError("receipt provider only supports verifier-authority commands")
+    receipt = VerifierReceipt(
+        statement=statement,
+        public_key=_TEST_PUBLIC_KEY,
+        signature=_TEST_PRIVATE_KEY.sign(verifier_statement_signing_bytes(statement)),
+    )
+    return verifier_receipt_json(receipt)
+
+
+def _authority_command(
+    market,
+    state: SingleSlotAbstractState,
+    cmd: SingleSlotAbstractCommand,
+) -> FrozenDict:
+    receipt = _model_receipt_provider(market, state, cmd)
+    return replace(cmd, verifier_receipt=receipt).as_json()
+
+
 def _make_request(
     binding,
     state,
@@ -114,6 +206,32 @@ def _make_request(
             SingleSlotAbstractState.from_json(state)
         ),
     )
+
+
+def _pending_submission(profile, binding) -> SingleSlotAbstractState:
+    state = initial_abstract_state()
+    opened = apply_data_adapter(
+        profile,
+        binding,
+        _make_request(
+            binding,
+            state.as_json(),
+            freeze_json({"kind": "open_bounty"}),
+        ),
+    )
+    assert opened.decision_kind is AdapterDecisionKind.ACCEPT
+    state = SingleSlotAbstractState.from_json(opened.post_state)
+    submitted = apply_data_adapter(
+        profile,
+        binding,
+        _make_request(
+            binding,
+            state.as_json(),
+            freeze_json({"kind": "submit_candidate"}),
+        ),
+    )
+    assert submitted.decision_kind is AdapterDecisionKind.ACCEPT
+    return SingleSlotAbstractState.from_json(submitted.post_state)
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +585,20 @@ def test_command_from_json_rejects_irrelevant_fields() -> None:
         SingleSlotAbstractCommand.from_json(bad_cmd)
 
 
+def test_command_rejects_receipt_on_non_authority_kind() -> None:
+    with pytest.raises(ValueError, match="verifier_receipt is not applicable"):
+        SingleSlotAbstractCommand(
+            kind=AbstractCommandKind.OPEN_BOUNTY,
+            verifier_receipt=FrozenDict(),
+        )
+
+
+def test_command_from_json_rejects_inapplicable_null_receipt() -> None:
+    bad_cmd = freeze_json({"kind": "open_bounty", "verifier_receipt": None})
+    with pytest.raises(ValueError, match="verifier_receipt is not applicable"):
+        SingleSlotAbstractCommand.from_json(bad_cmd)
+
+
 def test_command_as_json_omits_irrelevant_fields() -> None:
     cmd = SingleSlotAbstractCommand(kind=AbstractCommandKind.OPEN_BOUNTY)
     j = cmd.as_json()
@@ -649,7 +781,7 @@ def test_open_bounty_via_adapter(binding) -> None:
     assert resp.post_state["escrow_atoms"] == 1000
 
 
-def test_full_lifecycle_via_adapter(binding) -> None:
+def test_full_lifecycle_via_adapter(binding, market) -> None:
     state = initial_abstract_state()
 
     # 1. Open bounty
@@ -669,7 +801,14 @@ def test_full_lifecycle_via_adapter(binding) -> None:
 
     # 3. Verify submission (accepted)
     resp = apply_data_adapter(load_profile(), binding, _make_request(binding, state.as_json(),
-        freeze_json({"kind": "verify_submission", "accepted": True}),
+        _authority_command(
+            market,
+            state,
+            SingleSlotAbstractCommand(
+                kind=AbstractCommandKind.VERIFY_SUBMISSION,
+                accepted=True,
+            ),
+        ),
         time_class="challenge_window", now_epoch_s=1050))
     assert resp.decision_kind is AdapterDecisionKind.ACCEPT
     state = SingleSlotAbstractState.from_json(resp.post_state)
@@ -693,7 +832,7 @@ def test_full_lifecycle_via_adapter(binding) -> None:
     assert state.escrow_atoms == 0
 
 
-def test_committed_failure_is_distinct(binding) -> None:
+def test_committed_failure_is_distinct(binding, market) -> None:
     state = initial_abstract_state()
 
     # Open bounty
@@ -708,7 +847,14 @@ def test_committed_failure_is_distinct(binding) -> None:
 
     # Verify submission (rejected) → committed failure
     resp = apply_data_adapter(load_profile(), binding, _make_request(binding, state.as_json(),
-        freeze_json({"kind": "verify_submission", "accepted": False}),
+        _authority_command(
+            market,
+            state,
+            SingleSlotAbstractCommand(
+                kind=AbstractCommandKind.VERIFY_SUBMISSION,
+                accepted=False,
+            ),
+        ),
         time_class="challenge_window", now_epoch_s=1050))
     assert resp.decision_kind is AdapterDecisionKind.COMMITTED_FAILURE
     assert resp.reason_code is not None
@@ -718,6 +864,94 @@ def test_committed_failure_is_distinct(binding) -> None:
     assert resp.receipt is not None
     # Effect plan hash must be authoritative
     assert resp.effect_plan_hash == resp.receipt["effect_plan_hash"]
+
+
+def test_verifier_command_without_receipt_rejects_missing_evidence(
+    profile,
+    binding,
+) -> None:
+    state = _pending_submission(profile, binding)
+
+    response = apply_data_adapter(
+        profile,
+        binding,
+        _make_request(
+            binding,
+            state.as_json(),
+            freeze_json({"kind": "verify_submission", "accepted": True}),
+            time_class="challenge_window",
+            now_epoch_s=1050,
+        ),
+    )
+
+    assert response.decision_kind is AdapterDecisionKind.REJECT
+    assert response.reason_code == "MISSING_EVIDENCE"
+    assert response.effects == ()
+    assert response.receipt is None
+
+
+def test_verifier_command_rejects_tampered_receipt_signature(
+    profile,
+    binding,
+    market,
+) -> None:
+    state = _pending_submission(profile, binding)
+    command = thaw_json(
+        _authority_command(
+            market,
+            state,
+            SingleSlotAbstractCommand(
+                kind=AbstractCommandKind.VERIFY_SUBMISSION,
+                accepted=True,
+            ),
+        )
+    )
+    command["verifier_receipt"]["signature_hex"] = "00" * 64
+
+    response = apply_data_adapter(
+        profile,
+        binding,
+        _make_request(
+            binding,
+            state.as_json(),
+            freeze_json(command),
+            time_class="challenge_window",
+            now_epoch_s=1050,
+        ),
+    )
+
+    assert response.decision_kind is AdapterDecisionKind.REJECT
+    assert response.reason_code == "INVALID_EVIDENCE"
+    assert response.effects == ()
+
+
+def test_verifier_receipt_rejects_unknown_fields_before_authority(
+    profile,
+    binding,
+    market,
+) -> None:
+    state = _pending_submission(profile, binding)
+    command = thaw_json(
+        _authority_command(
+            market,
+            state,
+            SingleSlotAbstractCommand(
+                kind=AbstractCommandKind.VERIFY_SUBMISSION,
+                accepted=True,
+            ),
+        )
+    )
+    command["verifier_receipt"]["unexpected"] = "discard-me"
+
+    response = apply_data_adapter(
+        profile,
+        binding,
+        _make_request(binding, state.as_json(), freeze_json(command)),
+    )
+
+    assert response.decision_kind is AdapterDecisionKind.INVALID_INPUT
+    assert response.reason_code == InvalidInputCode.ABSTRACT_COMMAND_OUT_OF_DOMAIN.value
+    assert response.effects == ()
 
 
 # ---------------------------------------------------------------------------
@@ -970,8 +1204,11 @@ def test_profile_and_source_manifest_are_packaged_resources() -> None:
 def test_complete_enumeration_search_completes(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
-    result = enumerate_all_transitions(profile, binding)
+    result = enumerate_all_transitions(
+        profile, binding, receipt_provider=_model_receipt_provider,
+    )
     assert result.search_complete is True
+    assert result.authority_evidence_complete is True
     assert result.budget_exhausted is False
     assert result.reachable_states > 0
     assert result.total_cases > 0
@@ -985,11 +1222,45 @@ def test_complete_enumeration_search_completes(profile, binding) -> None:
 def test_enumeration_enforces_state_budget_per_successor(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
-    result = enumerate_all_transitions(profile, binding, max_states=3)
+    result = enumerate_all_transitions(
+        profile, binding, max_states=3, receipt_provider=_model_receipt_provider,
+    )
 
     assert result.reachable_states == 3
     assert result.search_complete is False
+    assert result.authority_evidence_complete is True
     assert result.budget_exhausted is True
+
+
+def test_enumeration_without_authority_provider_is_not_complete(profile, binding) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    result = enumerate_all_transitions(profile, binding)
+
+    assert result.search_complete is False
+    assert result.authority_evidence_complete is False
+    assert result.budget_exhausted is False
+
+
+def test_enumeration_rejects_inadmissible_authority_provider(profile, binding) -> None:
+    from popperpad.refinement.enumerator import enumerate_all_transitions
+
+    def invalid_provider(market, state, command):
+        receipt = thaw_json(_model_receipt_provider(market, state, command))
+        receipt["signature_hex"] = "00" * 64
+        invalid = freeze_json(receipt)
+        assert isinstance(invalid, FrozenDict)
+        return invalid
+
+    with pytest.raises(
+        RuntimeError,
+        match="receipt_provider produced inadmissible verifier evidence",
+    ):
+        enumerate_all_transitions(
+            profile,
+            binding,
+            receipt_provider=invalid_provider,
+        )
 
 
 @pytest.mark.parametrize("max_states", [0, -1, True, 3.5])
@@ -1007,15 +1278,21 @@ def test_enumeration_rejects_invalid_state_budgets(
 def test_enumeration_corpus_hash_is_deterministic(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
-    result1 = enumerate_all_transitions(profile, binding)
-    result2 = enumerate_all_transitions(profile, binding)
+    result1 = enumerate_all_transitions(
+        profile, binding, receipt_provider=_model_receipt_provider,
+    )
+    result2 = enumerate_all_transitions(
+        profile, binding, receipt_provider=_model_receipt_provider,
+    )
     assert result1.corpus_hash == result2.corpus_hash
 
 
 def test_enumeration_covers_all_command_variants(profile, binding) -> None:
     from popperpad.refinement.enumerator import enumerate_all_transitions
 
-    result = enumerate_all_transitions(profile, binding)
+    result = enumerate_all_transitions(
+        profile, binding, receipt_provider=_model_receipt_provider,
+    )
     assert result.command_variants == 10
     assert result.time_classes == 5
 
@@ -1037,7 +1314,11 @@ def test_enumeration_uses_supplied_profile_time_representatives(profile, binding
     shifted_profile = replace(profile, semantic_profile=shifted_semantic)
     shifted_binding = replace(binding, profile_hash=shifted_profile.hash())
 
-    result = enumerate_all_transitions(shifted_profile, shifted_binding)
+    result = enumerate_all_transitions(
+        shifted_profile,
+        shifted_binding,
+        receipt_provider=_model_receipt_provider,
+    )
 
     assert result.search_complete is True
     assert result.reachable_states > 1

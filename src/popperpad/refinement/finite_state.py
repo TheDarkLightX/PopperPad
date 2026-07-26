@@ -352,14 +352,18 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
     The command kind selects the transition. For verify_submission, the
     accepted boolean selects the sub-variant. For resolve_challenge, the
     upheld boolean selects the sub-variant. All other kinds must not carry
-    accepted or upheld — variant-inapplicable fields are rejected.
+    accepted, upheld, or verifier evidence — variant-inapplicable fields are
+    rejected.
 
-    No arbitrary IDs or refs — those come from the profile.
+    State and command identities come from the finite profile. Verifier
+    authority commands may additionally carry one exact caller-supplied,
+    content-addressed receipt whose signature the market core verifies.
     """
 
     kind: AbstractCommandKind
     accepted: bool | None = None
     upheld: bool | None = None
+    verifier_receipt: FrozenDict[JsonValue] | None = None
 
     def __post_init__(self) -> None:
         if type(self.kind) is not AbstractCommandKind:
@@ -368,8 +372,11 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
             raise TypeError("accepted must be null or bool")
         if self.upheld is not None and type(self.upheld) is not bool:
             raise TypeError("upheld must be null or bool")
+        if self.verifier_receipt is not None and type(self.verifier_receipt) is not FrozenDict:
+            raise TypeError("verifier_receipt must be null or FrozenDict")
         needs_accepted = self.kind is AbstractCommandKind.VERIFY_SUBMISSION
         needs_upheld = self.kind is AbstractCommandKind.RESOLVE_CHALLENGE
+        supports_receipt = needs_accepted or needs_upheld
         if needs_accepted and self.accepted is None:
             raise ValueError("verify_submission requires accepted")
         if not needs_accepted and self.accepted is not None:
@@ -378,6 +385,8 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
             raise ValueError("resolve_challenge requires upheld")
         if not needs_upheld and self.upheld is not None:
             raise ValueError(f"upheld is not applicable to {self.kind.value}")
+        if not supports_receipt and self.verifier_receipt is not None:
+            raise ValueError(f"verifier_receipt is not applicable to {self.kind.value}")
         DeeplyImmutable.__post_init__(self)
 
     def as_json(self) -> FrozenDict[JsonValue]:
@@ -386,6 +395,8 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
             fields["accepted"] = self.accepted
         if self.upheld is not None:
             fields["upheld"] = self.upheld
+        if self.verifier_receipt is not None:
+            fields["verifier_receipt"] = self.verifier_receipt
         value = freeze_json(fields)
         assert isinstance(value, FrozenDict)
         return value
@@ -393,7 +404,7 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
     @classmethod
     def from_json(cls, data: FrozenDict[JsonValue]) -> "SingleSlotAbstractCommand":
         kind = AbstractCommandKind(data["kind"])
-        allowed = frozenset({"kind", "accepted", "upheld"})
+        allowed = frozenset({"kind", "accepted", "upheld", "verifier_receipt"})
         unknown = sorted(frozenset(data) - allowed)
         if unknown:
             raise ValueError(f"command contains unknown fields: {unknown}")
@@ -401,6 +412,17 @@ class SingleSlotAbstractCommand(DeeplyImmutable):
             raise ValueError(f"accepted is not applicable to {kind.value}")
         if kind is not AbstractCommandKind.RESOLVE_CHALLENGE and "upheld" in data:
             raise ValueError(f"upheld is not applicable to {kind.value}")
+        if kind not in (
+            AbstractCommandKind.VERIFY_SUBMISSION,
+            AbstractCommandKind.RESOLVE_CHALLENGE,
+        ) and "verifier_receipt" in data:
+            raise ValueError(f"verifier_receipt is not applicable to {kind.value}")
         accepted = data.get("accepted")
         upheld = data.get("upheld")
-        return cls(kind=kind, accepted=accepted, upheld=upheld)
+        verifier_receipt = data.get("verifier_receipt")
+        return cls(
+            kind=kind,
+            accepted=accepted,
+            upheld=upheld,
+            verifier_receipt=verifier_receipt,
+        )

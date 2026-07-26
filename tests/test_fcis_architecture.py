@@ -35,6 +35,7 @@ CORE_MODULES = (
     "popperpad.core.evidence",
     "popperpad.core.graph",
     "popperpad.core.market",
+    "popperpad.core.market_invariants",
     "popperpad.core.mechanism",
     "popperpad.core.outbox",
     "popperpad.core.recipe",

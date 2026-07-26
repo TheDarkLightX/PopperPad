@@ -47,7 +47,10 @@ from ..core.market import (
     CancelBounty,
     ChallengeState,
     ChallengeStatus,
+    ChallengeVerifierStatement,
+    ChallengeVerdict,
     MarketCommand,
+    MarketEvidence,
     MarketEffect,
     MarketPolicy,
     OpenBounty,
@@ -57,9 +60,13 @@ from ..core.market import (
     SettleBounty,
     SubmissionState,
     SubmissionStatus,
+    SubmissionVerifierStatement,
+    SubmissionVerdict,
     SubmitCandidate,
+    VerifierReceipt,
     VerifySubmission,
     apply_market_command,
+    verifier_receipt_ref,
 )
 from ..core.market_invariants import market_state_violations
 from ..core.result import Accept, CommittedFailure, Reject
@@ -376,6 +383,8 @@ def concretize_command(
     abstract: SingleSlotAbstractState,
     cmd: SingleSlotAbstractCommand,
     now_epoch_s: int,
+    *,
+    verifier_receipt_ref_override: str | None = None,
 ) -> MarketCommand:
     """Concretize an abstract command into a concrete MarketCommand.
 
@@ -395,7 +404,9 @@ def concretize_command(
     if cmd.kind is AbstractCommandKind.VERIFY_SUBMISSION:
         return VerifySubmission(
             cmd_id, profile.submission_id, profile.verifier_ref,
-            profile.verifier_receipt_ref, cmd.accepted, now_epoch_s,
+            verifier_receipt_ref_override or profile.verifier_receipt_ref,
+            cmd.accepted,
+            now_epoch_s,
         )
     if cmd.kind is AbstractCommandKind.OPEN_CHALLENGE:
         return OpenChallenge(
@@ -406,7 +417,9 @@ def concretize_command(
     if cmd.kind is AbstractCommandKind.RESOLVE_CHALLENGE:
         return ResolveChallenge(
             cmd_id, profile.challenge_id, profile.verifier_ref,
-            profile.challenge_receipt_ref, cmd.upheld, now_epoch_s,
+            verifier_receipt_ref_override or profile.challenge_receipt_ref,
+            cmd.upheld,
+            now_epoch_s,
         )
     if cmd.kind is AbstractCommandKind.ADVANCE_BOUNTY:
         return AdvanceBounty(cmd_id, now_epoch_s)
@@ -597,13 +610,25 @@ def _handle_step(
                               pre_state=abstract.as_json(), pre_state_hash=actual_pre_hash)
 
     try:
-        concrete_cmd = concretize_command(market, abstract, cmd, now)
+        evidence = _command_market_evidence(cmd)
+        receipt_ref_override = (
+            verifier_receipt_ref(evidence.verifier_receipts[0])
+            if evidence.verifier_receipts
+            else None
+        )
+        concrete_cmd = concretize_command(
+            market,
+            abstract,
+            cmd,
+            now,
+            verifier_receipt_ref_override=receipt_ref_override,
+        )
     except (ValueError, TypeError, KeyError) as exc:
         return _invalid_input(request, InvalidInputCode.ABSTRACT_COMMAND_OUT_OF_DOMAIN,
                               "$.command", str(exc),
                               pre_state=abstract.as_json(), pre_state_hash=actual_pre_hash)
 
-    decision = apply_market_command(concrete_state, concrete_cmd, market.policy)
+    decision = apply_market_command(concrete_state, concrete_cmd, market.policy, evidence)
 
     if isinstance(decision, Reject):
         return build_response(
@@ -667,6 +692,139 @@ def _handle_step(
         projection_warnings=(),
     )
 
+
+def _command_market_evidence(cmd: SingleSlotAbstractCommand) -> MarketEvidence:
+    if cmd.verifier_receipt is None:
+        return MarketEvidence()
+    return MarketEvidence((_parse_verifier_receipt(cmd.verifier_receipt),))
+
+
+def _parse_verifier_receipt(data: FrozenDict[JsonValue]) -> VerifierReceipt:
+    _require_exact_object_fields(
+        data,
+        frozenset(
+            {
+                "schema",
+                "algorithm",
+                "public_key_hex",
+                "signature_hex",
+                "statement",
+            }
+        ),
+        "verifier_receipt",
+    )
+    if _get_str(data, "schema") != "popperpad/market-verifier-receipt/v1":
+        raise ValueError("verifier_receipt.schema is not supported")
+    if _get_str(data, "algorithm") != "ed25519":
+        raise ValueError("verifier_receipt.algorithm must be ed25519")
+    return VerifierReceipt(
+        statement=_parse_verifier_statement(_get_dict(data, "statement")),
+        public_key=_decode_canonical_hex(data, "public_key_hex", byte_length=32),
+        signature=_decode_canonical_hex(data, "signature_hex", byte_length=64),
+    )
+
+
+def _parse_verifier_statement(
+    data: FrozenDict[JsonValue],
+) -> SubmissionVerifierStatement | ChallengeVerifierStatement:
+    schema = _get_str(data, "schema")
+    if schema == "popperpad/market-verifier-statement/submission/v1":
+        _require_exact_object_fields(
+            data,
+            frozenset(
+                {
+                    "schema",
+                    "pre_state_hash",
+                    "policy_hash",
+                    "bounty_id",
+                    "claim_ref",
+                    "context_ref",
+                    "submission_id",
+                    "recipe_ref",
+                    "evidence_refs",
+                    "artifact_refs",
+                    "outcome",
+                }
+            ),
+            "verifier_receipt.statement",
+        )
+        return SubmissionVerifierStatement(
+            pre_state_hash=_get_ref(data, "pre_state_hash"),
+            policy_hash=_get_ref(data, "policy_hash"),
+            bounty_id=_get_str(data, "bounty_id"),
+            claim_ref=_get_ref(data, "claim_ref"),
+            context_ref=_get_opt_ref(data, "context_ref"),
+            submission_id=_get_str(data, "submission_id"),
+            recipe_ref=_get_ref(data, "recipe_ref"),
+            evidence_refs=_get_ref_tuple(data, "evidence_refs"),
+            artifact_refs=_get_ref_tuple(data, "artifact_refs"),
+            outcome=SubmissionVerdict(_get_str(data, "outcome")),
+        )
+    if schema == "popperpad/market-verifier-statement/challenge/v1":
+        _require_exact_object_fields(
+            data,
+            frozenset(
+                {
+                    "schema",
+                    "pre_state_hash",
+                    "policy_hash",
+                    "bounty_id",
+                    "claim_ref",
+                    "context_ref",
+                    "challenge_id",
+                    "submission_id",
+                    "finding_kind",
+                    "evidence_refs",
+                    "outcome",
+                }
+            ),
+            "verifier_receipt.statement",
+        )
+        return ChallengeVerifierStatement(
+            pre_state_hash=_get_ref(data, "pre_state_hash"),
+            policy_hash=_get_ref(data, "policy_hash"),
+            bounty_id=_get_str(data, "bounty_id"),
+            claim_ref=_get_ref(data, "claim_ref"),
+            context_ref=_get_opt_ref(data, "context_ref"),
+            challenge_id=_get_str(data, "challenge_id"),
+            submission_id=_get_str(data, "submission_id"),
+            finding_kind=_get_str(data, "finding_kind"),
+            evidence_refs=_get_ref_tuple(data, "evidence_refs"),
+            outcome=ChallengeVerdict(_get_str(data, "outcome")),
+        )
+    raise ValueError("verifier_receipt.statement.schema is not supported")
+
+
+def _require_exact_object_fields(
+    data: FrozenDict[JsonValue],
+    expected: frozenset[str],
+    field_path: str,
+) -> None:
+    actual = frozenset(data)
+    unknown = sorted(actual - expected)
+    if unknown:
+        raise ValueError(f"{field_path} contains unknown fields: {unknown}")
+    missing = sorted(expected - actual)
+    if missing:
+        raise ValueError(f"{field_path} is missing required fields: {missing}")
+
+
+def _decode_canonical_hex(
+    data: FrozenDict[JsonValue],
+    key: str,
+    *,
+    byte_length: int,
+) -> bytes:
+    value = _get_str(data, key)
+    if len(value) != byte_length * 2 or value != value.lower():
+        raise ValueError(f"field {key!r} must be canonical lowercase hex")
+    try:
+        decoded = bytes.fromhex(value)
+    except ValueError as exc:
+        raise ValueError(f"field {key!r} must be canonical lowercase hex") from exc
+    if decoded.hex() != value:
+        raise ValueError(f"field {key!r} must be canonical lowercase hex")
+    return decoded
 
 # ---------------------------------------------------------------------------
 # JSON helper functions — strict, no silent normalization.

@@ -12,7 +12,7 @@
       "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     ],
     "accepted_verifier_refs": [
-      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      "sha256:2c333f465cfc21933e6e9cd91adf7734e6552732cd3b49ff2f0e849842034951"
     ]
   },
   "market_policy": {
@@ -32,7 +32,7 @@
     "submitter_ref": "did:example:refuter",
     "challenger_ref": "did:example:challenger",
     "recipe_ref": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "verifier_ref": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "verifier_ref": "sha256:2c333f465cfc21933e6e9cd91adf7734e6552732cd3b49ff2f0e849842034951",
     "evidence_refs": [
       "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     ],
