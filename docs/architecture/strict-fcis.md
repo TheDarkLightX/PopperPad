@@ -55,6 +55,35 @@ untrusted bytes / remote artifacts
   -> idempotent outbox delivery
 ```
 
+## Authority evidence and exact publication candidates
+
+Market verification is an explicit value boundary. A command field such as
+`accepted=true` or `upheld=true` expresses the requested transition outcome; it
+does not authorize that outcome. Authorization requires a content-addressed
+Ed25519 verifier receipt whose signed statement binds all of the following:
+
+- the exact pre-state hash and market-policy hash;
+- the bounty, claim, and context;
+- the exact submission or challenge and its evidence/artifact references;
+- the verifier outcome;
+- a public key whose domain-separated identity is accepted by the bounty terms.
+
+The core admits that receipt and verifies its signature before applying the pure
+transition. Verifier execution, private-key custody, key revocation, and trust-list
+governance remain shell or protocol responsibilities. A valid signature proves
+which accepted key endorsed one exact statement. It does not independently prove
+that the verifier implementation or its inputs are scientifically sound.
+
+New commit publication uses `popperpad/receipt/v2`. Its command hash and replay
+identity bind the exact pre-state, timestamp, evidence root, object and blob rows,
+outbox intents, policy version, and core version. Effect IDs, the effect-plan hash,
+the next-state root, and the log-record hash are derived from that same candidate.
+The prepared-log boundary accepts the complete `CommitBundle`, revalidates payload
+content addresses and every derived field, and publishes it with compare-and-swap.
+Historical receipt-v1 records remain readable for existing pads; they cannot enter
+the new prepared-publication path.
+
+
 ## Python and Rust
 
 FCIS is a semantic architecture, not a language feature. Python is sufficient

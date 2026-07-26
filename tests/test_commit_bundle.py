@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,10 @@ from popperpad.adapters import Bundle, TrustPolicy
 from popperpad.adapters.bundle import export_bundle
 from popperpad.adapters.flow import import_bundle
 from popperpad.canonical import canonical_json_bytes, sha256_bytes
+from popperpad.core.codec import canonical_hash
 from popperpad.core.commit import BlobWrite, CommitBundle, ObjectWrite, plan_commit
 from popperpad.core.result import Reject
-from popperpad.core.values import FrozenDict
+from popperpad.core.values import FrozenDict, freeze_json, thaw_json
 from popperpad.log import AppendOnlyLog
 from popperpad.pad import PopperPad
 from popperpad.refs import Ref
@@ -42,6 +44,36 @@ def test_commit_plan_is_deterministic_domain_bound_and_immutable() -> None:
     assert isinstance(first.record, FrozenDict)
     assert isinstance(first.outbox[0].payload, FrozenDict)
     assert first.outbox[0].effect_id != first.commit_root
+
+def test_replay_identity_binds_effects_evidence_and_commit_time() -> None:
+    common = {
+        "expected_head": "",
+        "created_at": "2026-07-24T00:00:00Z",
+        "objects": (_domain("A"),),
+        "outbox": (("notify", {"value": 1}),),
+        "evidence_root": "sha256:" + "a" * 64,
+    }
+    baseline = plan_commit(**common)
+    changed_effect = plan_commit(
+        **{**common, "outbox": (("notify", {"value": 2}),)}
+    )
+    changed_evidence = plan_commit(
+        **{**common, "evidence_root": "sha256:" + "b" * 64}
+    )
+    changed_time = plan_commit(
+        **{**common, "created_at": "2026-07-24T00:00:01Z"}
+    )
+    assert all(
+        isinstance(value, CommitBundle)
+        for value in (baseline, changed_effect, changed_evidence, changed_time)
+    )
+    replay_ids = {
+        value.receipt.replay_id
+        for value in (baseline, changed_effect, changed_evidence, changed_time)
+        if isinstance(value, CommitBundle)
+    }
+    assert len(replay_ids) == 4
+
 
 
 def test_commit_plan_rejects_inexact_or_duplicate_authoritative_values() -> None:
@@ -141,7 +173,7 @@ def test_stale_commit_plan_is_rejected_without_authoritative_publication(tmp_pat
 
     pad._stage_commit_payloads(stale)
     with pytest.raises(ValueError, match="commit conflict"):
-        pad.log.append_prepared(stale.record, expected_head=expected_head)
+        pad.log.append_prepared(stale, expected_head=expected_head)
 
     assert pad.log.head() == winning_head
     authoritative_domains = [
@@ -182,7 +214,7 @@ def test_corrupt_predecessor_blocks_later_authoritative_append(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="record_hash mismatch"):
+    with pytest.raises(ValueError, match="INVALID_COMMIT_RECORD"):
         pad.put_object(_domain("second"))
     assert len(list(pad.log.iter_raw_records())) == 1
 
@@ -203,10 +235,40 @@ def test_mixed_legacy_and_v2_records_verify_as_one_hash_chain(tmp_path: Path) ->
         blobs=((b"next", "application/octet-stream"),),
     )
     assert isinstance(planned, CommitBundle)
-    log.append_prepared(planned.record, expected_head=legacy.record_hash)
+    log.append_prepared(planned, expected_head=legacy.record_hash)
     log.verify()
     assert log.head() == planned.record_hash
     assert [record["op"] for record in log.iter_records()] == ["note", "add_blob"]
+
+
+def test_prepared_log_rejects_self_hashed_semantic_forgery(tmp_path: Path) -> None:
+    log = AppendOnlyLog(path=tmp_path / "log.jsonl")
+    log.init()
+    planned = plan_commit(
+        expected_head="",
+        created_at="2026-07-24T00:00:00Z",
+        outbox=(("notify", {"value": 1}),),
+    )
+    assert isinstance(planned, CommitBundle)
+    forged = thaw_json(planned.record)
+    forged["commit_root"] = "sha256:" + "0" * 64
+    record_core = dict(forged)
+    record_core.pop("record_hash")
+    forged["record_hash"] = canonical_hash("log-record/v2", record_core)
+
+    forged_record = freeze_json(forged)
+    assert isinstance(forged_record, FrozenDict)
+    forged_bundle = replace(
+        planned,
+        commit_root=forged["commit_root"],
+        record_hash=forged["record_hash"],
+        record=forged_record,
+    )
+
+    with pytest.raises(ValueError, match="INVALID_COMMIT_RECORD"):
+        log.append_prepared(forged_bundle, expected_head="")
+
+    assert log.stats() == {"event_count": 0, "head": ""}
 
 
 def test_bundle_preflight_failure_commits_nothing(tmp_path: Path) -> None:

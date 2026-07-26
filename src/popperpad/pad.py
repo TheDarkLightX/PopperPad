@@ -153,9 +153,7 @@ class PopperPad:
         """Stage exact bytes, then make one prepared record authoritative."""
 
         self._stage_commit_payloads(planned)
-        record = thaw_json(planned.record)
-        require(isinstance(record, Mapping), "planned commit record must be an object")
-        append = self.log.append_prepared(record, expected_head=expected_head)
+        append = self.log.append_prepared(planned, expected_head=expected_head)
 
         if self._index_built:
             for logical_record in planned.logical_records():

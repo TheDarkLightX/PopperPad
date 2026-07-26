@@ -76,9 +76,9 @@ def test_market_core_has_no_effect_authority() -> None:
             assert not name.startswith("popperpad.") or name.startswith("popperpad.core"), name
 
 
-def test_market_transition_requires_state_command_and_policy_only() -> None:
+def test_market_transition_requires_explicit_state_command_policy_and_evidence() -> None:
     parameters = inspect.signature(market.apply_market_command).parameters
-    assert tuple(parameters) == ("state", "command", "policy")
+    assert tuple(parameters) == ("state", "command", "policy", "evidence")
     assert "now" not in parameters
     assert "storage" not in parameters
     assert "verifier" not in parameters

@@ -35,14 +35,23 @@ def sha256_bytes(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def domain_frame(domain: str, data: bytes) -> bytes:
+    """Frame immutable bytes under an explicit PopperPad semantic domain."""
+
+    if not isinstance(domain, str) or not domain or "\x00" in domain:
+        raise ValueError("domain must be a non-empty NUL-free string")
+    if type(data) is not bytes:
+        raise TypeError("domain-framed data must be exact bytes")
+    domain_bytes = domain.encode("utf-8")
+    if len(domain_bytes) > 65_535:
+        raise ValueError("domain must encode to at most 65535 bytes")
+    return _DOMAIN_PREFIX + len(domain_bytes).to_bytes(2, "big") + domain_bytes + data
+
+
 def domain_sha256(domain: str, data: bytes) -> str:
     """Hash immutable bytes under an explicit PopperPad semantic domain."""
 
-    if not isinstance(domain, str) or not domain or "\x00" in domain:
-        raise ValueError("hash domain must be a non-empty NUL-free string")
-    domain_bytes = domain.encode("utf-8")
-    framed = _DOMAIN_PREFIX + len(domain_bytes).to_bytes(2, "big") + domain_bytes + data
-    return sha256_bytes(framed)
+    return sha256_bytes(domain_frame(domain, data))
 
 
 def canonical_hash(domain: str, value: Any) -> str:

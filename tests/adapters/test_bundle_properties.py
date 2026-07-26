@@ -8,7 +8,7 @@ from popperpad.refs import Ref
 
 
 def _ref_strategy():
-    return st.builds(lambda hex_: Ref("sha256:" + hex_), st.from_regex(r"[0-9a-f]{64}", fullmatch=True))
+    return st.binary(min_size=32, max_size=32).map(lambda raw: Ref("sha256:" + raw.hex()))
 
 
 @st.composite
