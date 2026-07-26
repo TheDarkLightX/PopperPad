@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `a297f376323808dc5acbc1e47d50bc607531c15e`
-- bound source revision: `274ea6c571e6f82cee6df9ead890f7bc5b05e350`
+- bound source revision: `805826fed94407b8584d213cf140610aa4739f16`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -30,6 +30,7 @@ invent caller fields.
 
 Files in the repair scope:
 
+- `src/popperpad/core/verifier.py` as a bound authority dependency
 - `src/popperpad/refinement/finite_state.py`
 - `src/popperpad/refinement/market_adapter.py`
 - `src/popperpad/refinement/enumerator.py`
@@ -100,6 +101,11 @@ authority boundary without further core mutation.
 15. Enumeration binds receipt-bearing commands into request and corpus hashes,
     refuses `search_complete` without an external receipt provider, and aborts
     if that provider supplies missing or inadmissible evidence.
+16. The source manifest binds the Ed25519 verifier implementation used by the
+    market core, so signature-admission changes alter the binding hash.
+17. Oversized-record hashing preserves a pending trailing CR across chunks and
+    excludes it only when the next chunk begins with LF, making CRLF delimiter
+    stripping independent of chunk placement.
 
 ## Completed evidence
 
@@ -117,8 +123,10 @@ authority boundary without further core mutation.
   finite-search completeness.
 - Terminal-state, chunk-boundary, and manifest-schema regressions cover the
   final fail-closed integrity cases.
+- A split-CRLF chunk-edge regression proves the oversized input hash excludes
+  both delimiter bytes and the shell recovers for the next request.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 428 tests.
+- The complete local Python suite passes: 429 tests.
 - Rust formatting and strict clippy pass; all 14 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the

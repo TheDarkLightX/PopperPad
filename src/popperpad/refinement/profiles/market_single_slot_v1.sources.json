@@ -1,7 +1,7 @@
 {
   "schema": "popperpad/data-adapter-source-manifest/v1",
   "repository": "TheDarkLightX/PopperPad",
-  "commit": "274ea6c571e6f82cee6df9ead890f7bc5b05e350",
+  "commit": "805826fed94407b8584d213cf140610aa4739f16",
   "files": [
     {
       "path": "src/popperpad/core/adapter_protocol.py",
@@ -28,6 +28,10 @@
       "sha256": "sha256:8d5d37b92147f4510fe0f4423c0256731612d6f1477827ccb859f74417543404"
     },
     {
+      "path": "src/popperpad/core/verifier.py",
+      "sha256": "sha256:c0fec9c47390108982780af5adf5d81ea0eb7ae059b5895a7f45706dd91c52e9"
+    },
+    {
       "path": "src/popperpad/refinement/enumerator.py",
       "sha256": "sha256:8e6e9be9103a0639e0b3b3dcf0a8312d75ed3fb41ae3e496f715b66b5cd80c10"
     },
@@ -49,7 +53,7 @@
     },
     {
       "path": "src/popperpad/shells/data_adapter_jsonl.py",
-      "sha256": "sha256:689432e1ff58899f4378f1a561f654f5b323dbe0ad6afdd047c5ea4281b369b8"
+      "sha256": "sha256:ba809b090557cb2736e63aa7d891155ec96da52fa50d5a11b5b6e41e1a1e6cb8"
     }
   ],
   "profile_hash": "sha256:13de64edc0e98a8c006704c6b48f0e79c6267e80f5401b2ed690ede706672764",
