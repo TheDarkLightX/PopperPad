@@ -139,6 +139,11 @@ def parse_canonical_json(data: bytes) -> object:
             InvalidInputCode.NON_CANONICAL_JSON,
             f"invalid json: {exc}",
         ) from exc
+    except ValueError as exc:
+        raise StrictJSONParseError(
+            InvalidInputCode.NON_CANONICAL_JSON,
+            f"invalid json value: {exc}",
+        ) from exc
     if text[end:].strip():
         raise StrictJSONParseError(
             InvalidInputCode.NON_CANONICAL_JSON,

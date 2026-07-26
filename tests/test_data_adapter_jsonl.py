@@ -327,6 +327,21 @@ def test_run_jsonl_shell_processes_multiple_lines(profile, binding) -> None:
     assert responses[1]["decision_kind"] == "invalid_input"
 
 
+def test_run_jsonl_shell_recovers_after_integer_decoder_failure(profile, binding) -> None:
+    oversized_integer = b"9" * 5_000
+    valid = _canonical_bytes(_canonical_request_dict(binding_hash=binding.hash()))
+    stdin = io.BytesIO(oversized_integer + b"\n" + valid + b"\n")
+    stdout = io.BytesIO()
+
+    run_jsonl_shell(stdin, stdout)
+
+    responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(responses) == 2
+    assert responses[0]["decision_kind"] == "invalid_input"
+    assert responses[0]["input_bytes_hash"] == sha256_bytes(oversized_integer)
+    assert responses[1]["decision_kind"] == "accept"
+
+
 def test_run_jsonl_shell_returns_boundary_failure_for_blank_record(profile, binding) -> None:
     stdin = io.BytesIO(b"\n")
     stdout = io.BytesIO()
