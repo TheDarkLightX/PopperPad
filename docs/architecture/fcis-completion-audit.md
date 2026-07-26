@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `8478691f41fb73bec9db50237527721659100118`
-- bound source revision: `24e8169c6a60740475e3058b9c0ecb446a02a0ff`
+- bound source revision: `0adb3878667d507e5af7ccbb1902002d6f5550af`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -89,6 +89,9 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
     bounded chunk edge cannot split one physical record into two requests.
 12. The source-manifest loader validates the schema stored on disk instead of
     replacing it with a local constant.
+13. Finite enumeration enforces `max_states` before admitting each new
+    successor, so the advertised bound cannot be exceeded by one branching
+    expansion.
 
 ## Completed evidence
 
@@ -99,12 +102,12 @@ The existing market core, commit bundle, CAS log, and outbox remain unchanged.
 - Boundary tests cover invalid UTF-8, duplicate keys, floats, non-finite
   values, noncanonical encodings, blank records, framing-independent input-byte
   commitments, and oversized-line recovery.
-- Profile-shift and malformed-collection regressions cover enumeration inputs
-  and total-transition behavior.
+- Profile-shift, state-budget, and malformed-collection regressions cover
+  enumeration inputs, resource bounds, and total-transition behavior.
 - Terminal-state, chunk-boundary, and manifest-schema regressions cover the
   final fail-closed integrity cases.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 401 tests.
+- The complete local Python suite passes: 408 tests.
 - Rust formatting and strict clippy pass; all 13 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the
