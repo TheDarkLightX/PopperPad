@@ -505,3 +505,14 @@ def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
         stdout.write(response_bytes)
         stdout.write(b"\n")
         stdout.flush()
+
+
+def main() -> int:
+    """Run the installed JSONL adapter over standard binary streams."""
+
+    run_jsonl_shell(sys.stdin.buffer, sys.stdout.buffer)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

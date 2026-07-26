@@ -94,6 +94,13 @@ Install (editable):
 pip install -e .[dev]
 ```
 
+Run the bounded FCIS JSONL adapter (one canonical request and response per
+line):
+
+```bash
+python -m popperpad.shells.data_adapter_jsonl
+```
+
 Codex skills (optional):
 
 - Skill folders live under `skills/` (`popperpad-core`, `popperpad-formal-tools`).

@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -325,6 +329,27 @@ def test_run_jsonl_shell_processes_multiple_lines(profile, binding) -> None:
     assert len(responses) == 2
     assert responses[0]["decision_kind"] == "accept"
     assert responses[1]["decision_kind"] == "invalid_input"
+
+
+def test_module_entry_point_reads_stdin_and_writes_stdout() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(repository_root / "src")
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "popperpad.shells.data_adapter_jsonl"],
+        input=b"not json\n",
+        capture_output=True,
+        check=False,
+        cwd=repository_root,
+        env=environment,
+    )
+
+    assert completed.returncode == 0
+    response = json.loads(completed.stdout)
+    assert response["decision_kind"] == "invalid_input"
+    assert response["input_bytes_hash"] == sha256_bytes(b"not json")
+    assert completed.stderr == b""
 
 
 def test_run_jsonl_shell_recovers_after_integer_decoder_failure(profile, binding) -> None:
