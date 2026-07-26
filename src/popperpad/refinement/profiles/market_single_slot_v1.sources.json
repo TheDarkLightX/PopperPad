@@ -1,7 +1,7 @@
 {
   "schema": "popperpad/data-adapter-source-manifest/v1",
   "repository": "TheDarkLightX/PopperPad",
-  "commit": "3992a06b3697c124ab8c3473b3c4da0e42c65e9e",
+  "commit": "3876607550d1f5fd6d863987204f424174a72ac7",
   "files": [
     {
       "path": "src/popperpad/core/adapter_protocol.py",
@@ -53,7 +53,7 @@
     },
     {
       "path": "src/popperpad/shells/data_adapter_jsonl.py",
-      "sha256": "sha256:503d1c674cd89430c5dc22578acdb92ba7080b06ed369ffccbd747e76acd7489"
+      "sha256": "sha256:5434cf52d18b82e41a68718baceac750effe9bc8cf87880f57908cab0cd6230c"
     }
   ],
   "profile_hash": "sha256:13de64edc0e98a8c006704c6b48f0e79c6267e80f5401b2ed690ede706672764",
