@@ -1,19 +1,21 @@
 """Finite single-slot falsification-market abstract state.
 
 The abstract state is a genuinely finite closed value — not a mirror of
-arbitrary concrete ``BountyState`` JSON. All concrete identities (submission
-IDs, challenge IDs, command IDs, refs, timestamps) are supplied by the
-profile, not by the state. The state only tracks the finite phase, status,
-amount, and time-class dimensions that ESSO can enumerate.
+arbitrary concrete ``BountyState`` JSON. Concrete identities and timestamps
+are supplied by the profile. Authority receipt references are preserved as
+fixed-width SHA-256 values so projection never changes the authoritative
+concrete state.
 
 State dimensions (all finite):
   - phase: 6 values (draft, open, payable, settled, expired, canceled)
   - escrow_atoms: bounded by profile (0 or reward_atoms)
   - submission_status: 4 values (none, pending, verified, rejected)
   - submission_time_class: 6 values (none + 5 time classes)
+  - submission_receipt_ref: none or a fixed-width SHA-256 value
   - bond_atoms: bounded by profile (0 or bond_atoms)
   - challenge_status: 4 values (none, open, upheld, rejected)
   - challenge_opened_time_class: 6 values (none + 5 time classes)
+  - challenge_receipt_ref: none or a fixed-width SHA-256 value
   - deposit_atoms: bounded by profile (0 or deposit_atoms)
   - payable: 2 values (false, true)
   - settled: 2 values (false, true)
@@ -30,6 +32,7 @@ The profile supplies fixed concrete identities for concretization.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -155,15 +158,18 @@ _STATE_FIELDS = frozenset(
         "escrow_atoms",
         "submission_status",
         "submission_time_class",
+        "submission_receipt_ref",
         "bond_atoms",
         "challenge_status",
         "challenge_opened_time_class",
+        "challenge_receipt_ref",
         "deposit_atoms",
         "payable",
         "settled",
         "processed_command_mask",
     }
 )
+_SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _require_exact_fields(
@@ -184,7 +190,8 @@ def _require_exact_fields(
 class SingleSlotAbstractState(DeeplyImmutable):
     """Genuinely finite single-slot market state.
 
-    No arbitrary IDs, refs, timestamps, or processed-command strings.
+    No arbitrary IDs, timestamps, or processed-command strings.
+    Authority receipt references are fixed-width 256-bit values.
     The processed_command_mask is a bounded bitset over the 8 declared
     command slots, giving 2^8 = 256 possible masks.
 
@@ -196,9 +203,11 @@ class SingleSlotAbstractState(DeeplyImmutable):
     escrow_atoms: int
     submission_status: AbstractSubmissionStatus
     submission_time_class: TimeClassOrNone
+    submission_receipt_ref: str | None
     bond_atoms: int
     challenge_status: AbstractChallengeStatus
     challenge_opened_time_class: TimeClassOrNone
+    challenge_receipt_ref: str | None
     deposit_atoms: int
     payable: bool
     settled: bool
@@ -215,6 +224,10 @@ class SingleSlotAbstractState(DeeplyImmutable):
             raise TypeError("submission_status must be AbstractSubmissionStatus")
         if type(self.submission_time_class) is not TimeClassOrNone:
             raise TypeError("submission_time_class must be TimeClassOrNone")
+        _require_optional_receipt_ref(
+            self.submission_receipt_ref,
+            "submission_receipt_ref",
+        )
         if type(self.bond_atoms) is not int or isinstance(self.bond_atoms, bool):
             raise TypeError("bond_atoms must be an integer")
         if self.bond_atoms < 0:
@@ -223,6 +236,10 @@ class SingleSlotAbstractState(DeeplyImmutable):
             raise TypeError("challenge_status must be AbstractChallengeStatus")
         if type(self.challenge_opened_time_class) is not TimeClassOrNone:
             raise TypeError("challenge_opened_time_class must be TimeClassOrNone")
+        _require_optional_receipt_ref(
+            self.challenge_receipt_ref,
+            "challenge_receipt_ref",
+        )
         if type(self.deposit_atoms) is not int or isinstance(self.deposit_atoms, bool):
             raise TypeError("deposit_atoms must be an integer")
         if self.deposit_atoms < 0:
@@ -236,6 +253,7 @@ class SingleSlotAbstractState(DeeplyImmutable):
         if self.processed_command_mask < 0 or self.processed_command_mask >= (1 << len(COMMAND_SLOTS)):
             raise ValueError("processed_command_mask out of range")
         _check_temporal_consistency(self)
+        _check_receipt_consistency(self)
         DeeplyImmutable.__post_init__(self)
 
     def command_processed(self, slot: AbstractCommandKind) -> bool:
@@ -248,9 +266,11 @@ class SingleSlotAbstractState(DeeplyImmutable):
             escrow_atoms=self.escrow_atoms,
             submission_status=self.submission_status,
             submission_time_class=self.submission_time_class,
+            submission_receipt_ref=self.submission_receipt_ref,
             bond_atoms=self.bond_atoms,
             challenge_status=self.challenge_status,
             challenge_opened_time_class=self.challenge_opened_time_class,
+            challenge_receipt_ref=self.challenge_receipt_ref,
             deposit_atoms=self.deposit_atoms,
             payable=self.payable,
             settled=self.settled,
@@ -264,9 +284,11 @@ class SingleSlotAbstractState(DeeplyImmutable):
                 "escrow_atoms": self.escrow_atoms,
                 "submission_status": self.submission_status.value,
                 "submission_time_class": self.submission_time_class.value,
+                "submission_receipt_ref": self.submission_receipt_ref,
                 "bond_atoms": self.bond_atoms,
                 "challenge_status": self.challenge_status.value,
                 "challenge_opened_time_class": self.challenge_opened_time_class.value,
+                "challenge_receipt_ref": self.challenge_receipt_ref,
                 "deposit_atoms": self.deposit_atoms,
                 "payable": self.payable,
                 "settled": self.settled,
@@ -284,14 +306,25 @@ class SingleSlotAbstractState(DeeplyImmutable):
             escrow_atoms=data["escrow_atoms"],
             submission_status=AbstractSubmissionStatus(data["submission_status"]),
             submission_time_class=TimeClassOrNone(data["submission_time_class"]),
+            submission_receipt_ref=data["submission_receipt_ref"],
             bond_atoms=data["bond_atoms"],
             challenge_status=AbstractChallengeStatus(data["challenge_status"]),
             challenge_opened_time_class=TimeClassOrNone(data["challenge_opened_time_class"]),
+            challenge_receipt_ref=data["challenge_receipt_ref"],
             deposit_atoms=data["deposit_atoms"],
             payable=data["payable"],
             settled=data["settled"],
             processed_command_mask=data["processed_command_mask"],
         )
+
+
+def _require_optional_receipt_ref(value: str | None, field_name: str) -> None:
+    if value is None:
+        return
+    if type(value) is not str:
+        raise TypeError(f"{field_name} must be null or a string")
+    if not _SHA256_REF_RE.fullmatch(value):
+        raise ValueError(f"{field_name} must be a canonical sha256 reference")
 
 
 def _check_temporal_consistency(state: SingleSlotAbstractState) -> None:
@@ -309,6 +342,24 @@ def _check_temporal_consistency(state: SingleSlotAbstractState) -> None:
     else:
         if state.challenge_opened_time_class is TimeClassOrNone.NONE:
             raise ValueError("challenge_opened_time_class must not be none when challenge exists")
+
+
+def _check_receipt_consistency(state: SingleSlotAbstractState) -> None:
+    submission_resolved = state.submission_status in (
+        AbstractSubmissionStatus.VERIFIED,
+        AbstractSubmissionStatus.REJECTED,
+    )
+    if submission_resolved and state.submission_receipt_ref is None:
+        raise ValueError("submission_receipt_ref is required for a resolved submission")
+    if not submission_resolved and state.submission_receipt_ref is not None:
+        raise ValueError("submission_receipt_ref requires a resolved submission")
+
+    challenge_resolved = state.challenge_status in (
+        AbstractChallengeStatus.UPHELD,
+        AbstractChallengeStatus.REJECTED,
+    )
+    if not challenge_resolved and state.challenge_receipt_ref is not None:
+        raise ValueError("challenge_receipt_ref requires a resolved challenge")
 
 
 def validate_state_bounds(
@@ -335,9 +386,11 @@ def initial_abstract_state() -> SingleSlotAbstractState:
         escrow_atoms=0,
         submission_status=AbstractSubmissionStatus.NONE,
         submission_time_class=TimeClassOrNone.NONE,
+        submission_receipt_ref=None,
         bond_atoms=0,
         challenge_status=AbstractChallengeStatus.NONE,
         challenge_opened_time_class=TimeClassOrNone.NONE,
+        challenge_receipt_ref=None,
         deposit_atoms=0,
         payable=False,
         settled=False,

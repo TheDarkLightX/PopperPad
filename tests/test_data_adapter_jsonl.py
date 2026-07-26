@@ -66,6 +66,7 @@ def _canonical_request_dict(**overrides) -> dict:
         "state": {
             "bond_atoms": 0,
             "challenge_opened_time_class": "none",
+            "challenge_receipt_ref": None,
             "challenge_status": "none",
             "deposit_atoms": 0,
             "escrow_atoms": 0,
@@ -73,6 +74,7 @@ def _canonical_request_dict(**overrides) -> dict:
             "phase": "draft",
             "processed_command_mask": 0,
             "settled": False,
+            "submission_receipt_ref": None,
             "submission_status": "none",
             "submission_time_class": "none",
         },
