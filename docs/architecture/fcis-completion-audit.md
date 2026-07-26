@@ -5,7 +5,7 @@ Status: completed repair audit for the bounded market adapter.
 Review endpoints:
 
 - base: `a297f376323808dc5acbc1e47d50bc607531c15e`
-- bound source revision: `d09def976b20af56d69789ac9b28c4228db8f217`
+- bound source revision: `ee8d247e7f446eace45c7ee69e63b33e3b53abeb`
 - change class: authority-bearing canonical boundary and bounded refinement
 
 ## Authority and artifact scope
@@ -114,6 +114,8 @@ authority boundary without further core mutation.
 20. Submission and challenge projections preserve admitted receipt references
     as fixed-width finite state dimensions, so concretization retains the
     authority receipt's exact committed concrete state.
+21. Canonical JSON Unicode encoding failures become committed typed boundary
+    responses, so lone surrogate escapes cannot terminate the persistent shell.
 
 ## Completed evidence
 
@@ -139,8 +141,10 @@ authority boundary without further core mutation.
   a request over stdin, and validates its committed stdout response.
 - Sequential submission and challenge authority regressions prove projected
   receipt references and reconstructed concrete state hashes remain exact.
+- A lone-surrogate regression proves unencodable JSON is committed to its input
+  bytes and the following JSONL request still executes.
 - Retained-alias and getter-mutation tests cover enumeration immutability.
-- The complete local Python suite passes: 432 tests.
+- The complete local Python suite passes: 433 tests.
 - Rust formatting and strict clippy pass; all 14 Rust tests pass.
 - A fresh wheel builds, contains both FCIS JSON resources, installs in an
   isolated environment, verifies every packaged source digest, and emits the
