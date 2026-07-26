@@ -442,6 +442,37 @@ def _strip_jsonl_delimiter(line: bytes) -> bytes:
     return payload[:-1] if payload.endswith(b"\r") else payload
 
 
+def _hash_oversized_jsonl_payload(first_chunk: bytes, stdin: BinaryIO) -> str:
+    """Drain one oversized record and hash its payload without its delimiter."""
+
+    digest = hashlib.sha256()
+    chunk = first_chunk
+    pending_cr = False
+    while True:
+        if pending_cr:
+            if chunk.startswith(b"\n"):
+                break
+            digest.update(b"\r")
+            pending_cr = False
+
+        if chunk.endswith(b"\n"):
+            digest.update(_strip_jsonl_delimiter(chunk))
+            break
+        if chunk.endswith(b"\r"):
+            digest.update(chunk[:-1])
+            pending_cr = True
+        else:
+            digest.update(chunk)
+
+        chunk = stdin.readline(MAX_REQUEST_BYTES + 2)
+        if not chunk:
+            if pending_cr:
+                digest.update(b"\r")
+            break
+
+    return "sha256:" + digest.hexdigest()
+
+
 def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
     """Run the JSONL shell: read lines from stdin, write responses to stdout."""
 
@@ -452,22 +483,13 @@ def run_jsonl_shell(stdin: BinaryIO, stdout: BinaryIO) -> None:
         if not line:
             break
         if len(line) > MAX_REQUEST_BYTES and not line.endswith(b"\n"):
-            digest = hashlib.sha256()
-            digest.update(line)
-            while True:
-                line = stdin.readline(MAX_REQUEST_BYTES + 2)
-                if not line:
-                    break
-                if line.endswith(b"\n"):
-                    digest.update(_strip_jsonl_delimiter(line))
-                    break
-                digest.update(line)
+            input_bytes_hash = _hash_oversized_jsonl_payload(line, stdin)
             response_bytes = _invalid_input_bytes(
                 binding,
                 InvalidInputCode.INPUT_TOO_LARGE,
                 "$",
                 f"request exceeds {MAX_REQUEST_BYTES} bytes",
-                "sha256:" + digest.hexdigest(),
+                input_bytes_hash,
             )
             stdout.write(response_bytes)
             stdout.write(b"\n")
