@@ -275,6 +275,11 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, Command]]:
     for command in COMMANDS:
         registry[command.name] = command
         sub_parser = sub.add_parser(command.name, help=command.help, description=command.help)
+        sub_parser.add_argument(
+            "--pad",
+            default=argparse.SUPPRESS,
+            help="Pad directory (default: popperpad_data)",
+        )
         command.configure(sub_parser)
     return parser, registry
 
