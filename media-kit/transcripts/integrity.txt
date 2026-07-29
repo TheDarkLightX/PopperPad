@@ -1,0 +1,38 @@
+popperpad % popperpad --pad ./pad blob-put --path ./observations.txt --media-type text/plain
+{
+  "blob_ref": "sha256:b0b33f2533fcaea9eb072fe2fba542c8e77665034f69bfb416550959b888f35b",
+  "bytes": 49,
+  "media_type": "text/plain",
+  "ok": true,
+  "record_hash": "sha256:81565b6088f98c72fa3270956df71b916a79221c3ace8225ed944db0a8eab8d1"
+}
+popperpad % popperpad --pad ./pad blob-get sha256:b0b33f2533fcaea9eb072fe2fba542c8e77665034f69bfb416550959b888f35b --out ./replayed-observations.txt
+{
+  "blob_ref": "sha256:b0b33f2533fcaea9eb072fe2fba542c8e77665034f69bfb416550959b888f35b",
+  "bytes": 49,
+  "ok": true,
+  "out": "/private/tmp/popperpad-media-kit/integrity/replayed-observations.txt"
+}
+popperpad % popperpad --pad ./pad checkpoint
+{
+  "checkpoint_ref": "sha256:156d9b99617d6d0f8f62188a2d19fc86dd508c103ae1b956cb0921a9748c6b2c",
+  "ok": true,
+  "record_hash": "sha256:620649a381659f476ddf57164a06726114419eb7da1dc431c6faffb254c36e1d"
+}
+popperpad % popperpad --pad ./pad doctor
+{
+  "ok": true,
+  "result": {
+    "issues": [],
+    "ok": true,
+    "stats": {
+      "blobs": 1,
+      "event_count": 2,
+      "head": "sha256:620649a381659f476ddf57164a06726114419eb7da1dc431c6faffb254c36e1d",
+      "objects": 1,
+      "schemas": {
+        "popperpad/checkpoint/v1": 1
+      }
+    }
+  }
+}

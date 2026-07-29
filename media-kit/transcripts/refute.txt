@@ -1,0 +1,30 @@
+popperpad % popperpad --pad ./pad refute sha256:4988084502d04ca288c31d3413b22ef4000d62ac97f63080221574cc1278b19b --context sha256:268a04ff7af0f83c51a01f096de9abfdc3181e74750e4f356aff186eb6773160
+{
+  "edge_refs": [
+    "sha256:e7d8a97cb66a27c9e071f98a04f424e86bb57ff60fc38965a51f8ea85d1e81f5"
+  ],
+  "evidence_refs": [
+    "sha256:2910d81b77e6887598ab378f9868b9ec36e331a88bd05f3c6a7676206e4833ad"
+  ],
+  "ok": true,
+  "verdict": "PASS"
+}
+popperpad % popperpad --pad ./pad status sha256:4988084502d04ca288c31d3413b22ef4000d62ac97f63080221574cc1278b19b --context sha256:268a04ff7af0f83c51a01f096de9abfdc3181e74750e4f356aff186eb6773160
+{
+  "ok": true,
+  "refutes": [
+    "sha256:e7d8a97cb66a27c9e071f98a04f424e86bb57ff60fc38965a51f8ea85d1e81f5"
+  ],
+  "state": "falsified",
+  "supports": []
+}
+popperpad % popperpad --pad ./pad query --schema popperpad/artifact/v1 --limit 5
+{
+  "objects": [
+    {
+      "ref": "sha256:4923a60a399af5d9f31336696c6e5ecc99847f024a67099cc2235b19515e1588",
+      "schema": "popperpad/artifact/v1"
+    }
+  ],
+  "ok": true
+}
