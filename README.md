@@ -85,6 +85,12 @@ Transfer:
 popperpad transfer-paths --pad ./pad --from <domain_ref> --to <domain_ref> --max-depth 4
 ```
 
+## Media kit
+
+The repository includes a reproducible
+[`media-kit`](media-kit/README.md) with authentic CLI workflows, terminal stills
+and videos, fictional example photos, tutorial copy, and publishing guardrails.
+
 ## Schemas
 
 JSON Schemas live under `schemas/v1/` (no runtime dependency on `jsonschema`).

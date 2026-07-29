@@ -1,0 +1,18 @@
+popperpad % popperpad --pad ./pad add --json ./objects/semantic-edge.json
+{
+  "obj_ref": "sha256:48d03186ff9c427236c6169d333d3a77c08eb80a1d5317cdcf0587848ce3a31c",
+  "ok": true,
+  "record_hash": "sha256:f2e45bc07fed64b9bd30910d689aa8538088d3d20c9be036405f150bd1fd7f4f"
+}
+popperpad % popperpad --pad ./pad transfer-paths --from sha256:3842d43d366a97c20e88d273c2d8316e26a44e3fc323c267df863e0aee0e71d2 --to sha256:b5a2949058e9da7a67dd9b73ba872e91d79deae67a8de982573af58af73d70ef --max-depth 2 --require-validated
+{
+  "ok": true,
+  "paths": [
+    {
+      "obligations_open": [],
+      "path": [
+        "sha256:48d03186ff9c427236c6169d333d3a77c08eb80a1d5317cdcf0587848ce3a31c"
+      ]
+    }
+  ]
+}
