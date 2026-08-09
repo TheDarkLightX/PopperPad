@@ -15,6 +15,13 @@ description: Use PopperPad to maintain an append-only, falsification-first knowl
 - Inspect: `popperpad status --pad ./pad <hyp_ref> --context <ctx_ref>`
 - Verify integrity before trusting/promoting: `popperpad doctor --pad ./pad`
 
+## Optional Kurate discovery
+
+- Import a bounded candidate batch: `popperpad kurate-discover --pad ./pad --search "<terms>" --limit 10`
+- Treat every `research-discovery/candidate/v1` object as triage only. It is not a hypothesis or evidence object and cannot affect derived status.
+- Review the exact arXiv source independently before creating a falsifiable hypothesis or attaching verifier evidence.
+- Retain `UNKNOWN` discovery-failure objects as negative knowledge. Do not reinterpret timeouts, network errors, or schema drift as an empty successful search.
+
 ## Append-only discipline
 
 - Never edit or delete existing pad files/objects; only add new objects and connect them with edges.

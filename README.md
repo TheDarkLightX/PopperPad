@@ -148,6 +148,24 @@ popperpad checkpoint --pad ./pad
 popperpad --pad ./pad gamification-leaderboard --point-kind xp
 ```
 
+Discover papers for later review through the bounded Kurate adapter:
+
+```bash
+popperpad kurate-discover --pad ./pad \
+  --search "symmetric projection operator" \
+  --category math.AG \
+  --sort-key novelty \
+  --limit 8
+```
+
+Kurate results enter the Pad as `research-discovery/candidate/v1` objects with
+`authority="triage_only"`. They are not hypotheses, evidence, or graph edges,
+so they cannot support, refute, or otherwise change a hypothesis status. The
+same atomic commit stores a batch receipt and the exact response bytes. Network
+failure or upstream schema drift records an `UNKNOWN` discovery-failure object
+instead of silently producing candidates. See
+[the Kurate adapter boundary](docs/kurate-discovery-adapter.md).
+
 Blobs (large artifacts):
 
 ```bash

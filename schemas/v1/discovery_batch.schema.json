@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/batch/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "provider",
+    "authority",
+    "request",
+    "request_uri",
+    "snapshot_ref",
+    "raw_response_ref",
+    "candidate_refs",
+    "non_claims"
+  ],
+  "properties": {
+    "schema": { "const": "research-discovery/batch/v1" },
+    "provider": { "const": "kurate" },
+    "authority": { "const": "triage_only" },
+    "request": {
+      "type": "object",
+      "required": ["search", "categories", "date_range", "sort_key", "sort_dir", "limit", "offset"],
+      "properties": {
+        "search": { "type": "string", "maxLength": 256 },
+        "categories": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" }
+        },
+        "date_range": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$" },
+        "sort_key": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "sort_dir": { "enum": ["asc", "desc"] },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 40 },
+        "offset": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      },
+      "additionalProperties": false
+    },
+    "request_uri": { "type": "string", "pattern": "^https://kurate\\.org/api/papers-list\\?" },
+    "snapshot_ref": { "$ref": "#/$defs/ref" },
+    "raw_response_ref": { "$ref": "#/$defs/ref" },
+    "candidate_refs": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "non_claims": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "Kurate assessments are discovery signals, not peer review." },
+        { "const": "Discovery candidates do not support or refute PopperPad hypotheses." },
+        { "const": "Primary-source review and independent checks remain required." }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    }
+  },
+  "$defs": {
+    "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

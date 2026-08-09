@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 SCHEMA_DOMAIN_V1 = "popperpad/domain/v1"
 SCHEMA_CONTEXT_V1 = "popperpad/context/v1"
 SCHEMA_BLOB_V1 = "popperpad/blob/v1"
@@ -18,6 +17,12 @@ SCHEMA_GAMIFICATION_QUEST_V1 = "popperpad/gamification/quest/v1"
 SCHEMA_TRUTH_CERTIFICATE_V1 = "popperpad/certificate/truth/v1"
 SCHEMA_VERIFIER_RECEIPT_V1 = "popperpad/verifier-receipt/v1"
 
+# Read-only research discovery schemas. These objects are deliberately outside
+# the hypothesis/evidence/edge authority path.
+SCHEMA_DISCOVERY_CANDIDATE_V1 = "research-discovery/candidate/v1"
+SCHEMA_DISCOVERY_BATCH_V1 = "research-discovery/batch/v1"
+SCHEMA_DISCOVERY_FAILURE_V1 = "research-discovery/failure/v1"
+
 LOG_SCHEMA_V1 = "popperpad/log_record/v1"
 
 # Decentralized adapter schemas (v1).
@@ -32,4 +37,3 @@ SCHEMA_PRIVACY_POLICY_V1 = "popperpad/adapter/privacy-policy/v1"
 SCHEMA_PUBLICATION_POLICY_V1 = "popperpad/publication-policy/v1"
 SCHEMA_CHAIN_ANCHOR_V1 = "popperpad/chain/anchor/v1"
 SCHEMA_IPFS_PINNING_RECEIPT_V1 = "popperpad/adapter/ipfs-pinning-receipt/v1"
-
