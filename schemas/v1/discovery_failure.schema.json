@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/failure/v1",
+  "type": "object",
+  "required": ["schema", "provider", "authority", "request", "status", "error", "non_claim"],
+  "properties": {
+    "schema": { "const": "research-discovery/failure/v1" },
+    "provider": { "const": "kurate" },
+    "authority": { "const": "triage_only" },
+    "request": {
+      "type": "object",
+      "required": ["search", "categories", "date_range", "sort_key", "sort_dir", "limit", "offset"],
+      "properties": {
+        "search": { "type": "string", "maxLength": 2048 },
+        "categories": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 256 }
+        },
+        "date_range": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "sort_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "sort_dir": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "limit": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+        "offset": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 }
+      },
+      "additionalProperties": false
+    },
+    "status": { "const": "UNKNOWN" },
+    "error": {
+      "type": "object",
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      },
+      "additionalProperties": false
+    },
+    "non_claim": { "const": "No discovery candidate or truth evidence was produced." }
+  },
+  "additionalProperties": false
+}

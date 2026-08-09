@@ -3,12 +3,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
+from .core.codec import canonical_json_bytes, sha256_bytes
+from .discovery.kurate import (
+    DISCOVERY_AUTHORITY,
+    KURATE_PROVIDER,
+    KurateAdapterError,
+    build_batch_object,
+    build_failure_object,
+    fetch_kurate_candidates,
+)
 from .gamification import aggregate_score_events
 from .pad import PopperPad
-from .refs import is_ref
 from .schemas import SCHEMA_GAMIFICATION_SCORE_EVENT_V1
 from .tui import print_dashboard, run_tui
 from .validate import validate_object
@@ -171,6 +180,73 @@ def _cmd_gamification_leaderboard(pad: PopperPad, ns: argparse.Namespace) -> int
     return 0
 
 
+def _cmd_kurate_discover(pad: PopperPad, ns: argparse.Namespace) -> int:
+    request = {
+        "search": str(ns.search),
+        "categories": list(ns.category or ()),
+        "date_range": str(ns.date_range),
+        "sort_key": str(ns.sort_key),
+        "sort_dir": str(ns.sort_dir),
+        "limit": int(ns.limit),
+        "offset": int(ns.offset),
+    }
+    try:
+        batch = fetch_kurate_candidates(
+            search=request["search"],
+            categories=request["categories"],
+            date_range=request["date_range"],
+            sort_key=request["sort_key"],
+            sort_dir=request["sort_dir"],
+            limit=request["limit"],
+            offset=request["offset"],
+            timeout_seconds=int(ns.timeout_seconds),
+        )
+    except KurateAdapterError as exc:
+        failure = build_failure_object(request=request, code=exc.code, detail=exc.detail)
+        committed = pad.commit_values(
+            objects=(failure,),
+            policy_version="popperpad-discovery-import-policy/v1",
+        )
+        _print(
+            {
+                "ok": False,
+                "provider": KURATE_PROVIDER,
+                "authority": DISCOVERY_AUTHORITY,
+                "status": "UNKNOWN",
+                "failure_ref": committed.object_refs[0],
+                "commit_root": committed.commit_root,
+                "error": {"code": exc.code, "detail": exc.detail},
+            }
+        )
+        return 2
+
+    candidate_refs = tuple(
+        sha256_bytes(canonical_json_bytes(candidate)) for candidate in batch.candidates
+    )
+    batch_object = build_batch_object(batch, candidate_refs=candidate_refs)
+    committed = pad.commit_values(
+        objects=tuple(batch.candidates) + (batch_object,),
+        blobs=((batch.raw_response, "application/json"),),
+        policy_version="popperpad-discovery-import-policy/v1",
+    )
+    if committed.object_refs[:-1] != candidate_refs:
+        raise RuntimeError("committed discovery candidate refs differ from the validated plan")
+    if committed.blob_refs != (batch.raw_response_ref,):
+        raise RuntimeError("committed Kurate response ref differs from the validated snapshot")
+    _print(
+        {
+            "ok": True,
+            "provider": KURATE_PROVIDER,
+            "authority": DISCOVERY_AUTHORITY,
+            "candidate_refs": list(candidate_refs),
+            "batch_ref": committed.object_refs[-1],
+            "raw_response_ref": committed.blob_refs[0],
+            "commit_root": committed.commit_root,
+        }
+    )
+    return 0
+
+
 def _configure_init(p: argparse.ArgumentParser) -> None:
     pass
 
@@ -231,6 +307,17 @@ def _configure_gamification_leaderboard(p: argparse.ArgumentParser) -> None:
     p.add_argument("--limit", type=int, default=20)
 
 
+def _configure_kurate_discover(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--search", default="", help="Optional bounded paper search")
+    p.add_argument("--category", action="append", default=None, help="Kurate category; repeatable")
+    p.add_argument("--date-range", default="all", help="Kurate date-range identifier")
+    p.add_argument("--sort-key", default="score", help="Kurate metric or published")
+    p.add_argument("--sort-dir", choices=("asc", "desc"), default="desc")
+    p.add_argument("--limit", type=int, default=10, help="Rows to request, from 1 through 40")
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--timeout-seconds", type=int, default=20)
+
+
 def _cmd_dashboard(pad: PopperPad, ns: argparse.Namespace) -> int:
     print_dashboard(str(ns.pad))
     return 0
@@ -262,6 +349,12 @@ COMMANDS: list[Command] = [
     Command("query", "List objects by schema (best-effort, scans log)", _configure_query, _cmd_query),
     Command("transfer-paths", "Find semantic-edge paths between two refs", _configure_transfer_paths, _cmd_transfer_paths),
     Command("gamification-leaderboard", "Derive a leaderboard from score events", _configure_gamification_leaderboard, _cmd_gamification_leaderboard),
+    Command(
+        "kurate-discover",
+        "Import bounded Kurate paper assessments as triage-only candidates",
+        _configure_kurate_discover,
+        _cmd_kurate_discover,
+    ),
     Command("dashboard", "Print a rich dashboard summary", _configure_dashboard, _cmd_dashboard),
     Command("tui", "Launch the interactive textual TUI", _configure_tui, _cmd_tui),
 ]

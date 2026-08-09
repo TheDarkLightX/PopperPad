@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/candidate/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "provider",
+    "authority",
+    "candidate_key",
+    "work_key",
+    "paper",
+    "assessment",
+    "provenance",
+    "selection"
+  ],
+  "properties": {
+    "schema": { "const": "research-discovery/candidate/v1" },
+    "provider": { "const": "kurate" },
+    "authority": { "const": "triage_only" },
+    "candidate_key": { "type": "string", "minLength": 1, "maxLength": 260 },
+    "work_key": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "paper": {
+      "type": "object",
+      "required": [
+        "provider_id",
+        "arxiv_id",
+        "arxiv_id_base",
+        "title",
+        "authors",
+        "primary_category",
+        "categories",
+        "published"
+      ],
+      "properties": {
+        "provider_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "arxiv_id": { "type": "string", "pattern": "^[A-Za-z0-9._/-]{3,64}$" },
+        "arxiv_id_base": { "type": "string", "pattern": "^[A-Za-z0-9._/-]{3,64}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "authors": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        },
+        "primary_category": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+        "categories": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" }
+        },
+        "published": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "assessment": {
+      "type": "object",
+      "required": ["metrics_milli", "scale"],
+      "properties": {
+        "metrics_milli": {
+          "type": "object",
+          "required": [
+            "score",
+            "significance",
+            "rigor",
+            "novelty",
+            "clarity",
+            "difficulty",
+            "surprisingness",
+            "reproducibility",
+            "translational_potential",
+            "evidence_strength",
+            "generalisability",
+            "interdisciplinarity",
+            "refutation_value",
+            "replication_value",
+            "resource_intensity",
+            "foundationality"
+          ],
+          "properties": {
+            "score": { "$ref": "#/$defs/metric" },
+            "significance": { "$ref": "#/$defs/metric" },
+            "rigor": { "$ref": "#/$defs/metric" },
+            "novelty": { "$ref": "#/$defs/metric" },
+            "clarity": { "$ref": "#/$defs/metric" },
+            "difficulty": { "$ref": "#/$defs/metric" },
+            "surprisingness": { "$ref": "#/$defs/metric" },
+            "reproducibility": { "$ref": "#/$defs/metric" },
+            "translational_potential": { "$ref": "#/$defs/metric" },
+            "evidence_strength": { "$ref": "#/$defs/metric" },
+            "generalisability": { "$ref": "#/$defs/metric" },
+            "interdisciplinarity": { "$ref": "#/$defs/metric" },
+            "refutation_value": { "$ref": "#/$defs/metric" },
+            "replication_value": { "$ref": "#/$defs/metric" },
+            "resource_intensity": { "$ref": "#/$defs/metric" },
+            "foundationality": { "$ref": "#/$defs/metric" }
+          },
+          "additionalProperties": false
+        },
+        "scale": {
+          "type": "object",
+          "required": ["minimum", "maximum", "unit"],
+          "properties": {
+            "minimum": { "const": 0 },
+            "maximum": { "const": 10000 },
+            "unit": { "const": "milli_point" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["paper_uri", "api_uri", "snapshot_ref"],
+      "properties": {
+        "paper_uri": { "type": "string", "pattern": "^https://kurate\\.org/paper/" },
+        "api_uri": { "type": "string", "pattern": "^https://kurate\\.org/api/papers-list\\?" },
+        "snapshot_ref": { "$ref": "#/$defs/ref" }
+      },
+      "additionalProperties": false
+    },
+    "selection": {
+      "type": "object",
+      "required": ["sort_key", "sort_dir", "position"],
+      "properties": {
+        "sort_key": {
+          "enum": [
+            "score",
+            "significance",
+            "rigor",
+            "novelty",
+            "clarity",
+            "difficulty",
+            "surprisingness",
+            "reproducibility",
+            "translational_potential",
+            "evidence_strength",
+            "generalisability",
+            "interdisciplinarity",
+            "refutation_value",
+            "replication_value",
+            "resource_intensity",
+            "foundationality",
+            "published"
+          ]
+        },
+        "sort_dir": { "enum": ["asc", "desc"] },
+        "position": { "type": "integer", "minimum": 0, "maximum": 1000040 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "metric": { "type": ["integer", "null"], "minimum": 0, "maximum": 10000 },
+    "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

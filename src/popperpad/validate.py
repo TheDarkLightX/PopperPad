@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+import re
+from collections.abc import Callable, Mapping
+from typing import Any
+
 from .core.result import Reject
 from .core.verifier_receipts import parse_verifier_receipt_object
-
-from .refs import ValidationError, is_ref, require, require_list, require_ref, require_str
+from .discovery.kurate import (
+    KurateAdapterError,
+    validate_discovery_batch,
+    validate_discovery_candidate,
+    validate_discovery_failure,
+)
+from .refs import ValidationError, require, require_list, require_ref, require_str
 from .schemas import (
     SCHEMA_ARTIFACT_V1,
     SCHEMA_CHECKPOINT_V1,
     SCHEMA_CONTEXT_V1,
+    SCHEMA_DISCOVERY_BATCH_V1,
+    SCHEMA_DISCOVERY_CANDIDATE_V1,
+    SCHEMA_DISCOVERY_FAILURE_V1,
     SCHEMA_DOMAIN_V1,
     SCHEMA_EDGE_V1,
     SCHEMA_EVIDENCE_V1,
@@ -21,8 +32,6 @@ from .schemas import (
     SCHEMA_TRUTH_CERTIFICATE_V1,
     SCHEMA_VERIFIER_RECEIPT_V1,
 )
-
-import re
 
 _TAG_RE = re.compile(r"^[A-Za-z0-9_\-./:]{1,64}$")
 _EDGE_TYPES = {"supports", "refutes", "supersedes", "depends_on", "topic", "semantic"}
@@ -590,6 +599,27 @@ def _validate_quest_anti_abuse(anti_abuse: Any) -> None:
         )
 
 
+def _validate_discovery_candidate(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_discovery_candidate(obj)
+    except (KurateAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _validate_discovery_batch(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_discovery_batch(obj)
+    except (KurateAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _validate_discovery_failure(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_discovery_failure(obj)
+    except (KurateAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
 VALIDATORS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     SCHEMA_DOMAIN_V1: _validate_domain,
     SCHEMA_CONTEXT_V1: _validate_context,
@@ -605,6 +635,9 @@ VALIDATORS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     SCHEMA_MARKET_RESOURCE_BUDGET_V1: _validate_market_resource_budget,
     SCHEMA_GAMIFICATION_SCORE_EVENT_V1: _validate_score_event,
     SCHEMA_GAMIFICATION_QUEST_V1: _validate_quest,
+    SCHEMA_DISCOVERY_CANDIDATE_V1: _validate_discovery_candidate,
+    SCHEMA_DISCOVERY_BATCH_V1: _validate_discovery_batch,
+    SCHEMA_DISCOVERY_FAILURE_V1: _validate_discovery_failure,
 }
 
 
