@@ -13,6 +13,19 @@ popperpad literature-import --pad ./pad --provider mosaic --input search.json
 
 `--input -` reads the exact JSON bytes from standard input.
 
+For a coordinated fleet, use the receipt-bound entry point:
+
+```bash
+popperpad-literature-importer \
+  --pad PAD --artifact export.json --artifact-sha256 sha256:... \
+  --provider citracer --receipt receipt.json \
+  --import-id citracer-seed --importer-id popperpad
+```
+
+It hashes the frozen input before and after import. The receipt binds the
+artifact, provider, import identity, and committed PopperPad references.
+Mutation, a digest mismatch, or a rejected import fails closed.
+
 ## Imported objects
 
 Every successful import atomically stores:

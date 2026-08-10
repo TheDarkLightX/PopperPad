@@ -178,6 +178,12 @@ schemas. They preserve the exact input bytes and MOSAIC partial-source errors,
 but remain outside the hypothesis and truth-evidence authority path. See
 [the literature import boundary](docs/literature-import-adapter.md).
 
+Fleet coordinators can call `popperpad-literature-importer` instead. It binds
+the exact frozen export hash to a
+`codex-fleet-literature-import-receipt/v1` file and returns the PopperPad
+commit, batch, blob, candidate, and relation references. The receipt remains
+`triage_only`.
+
 Blobs (large artifacts):
 
 ```bash
