@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/literature-failure/v1",
+  "type": "object",
+  "required": ["schema", "provider", "authority", "source_name", "status", "error", "non_claim"],
+  "properties": {
+    "schema": { "const": "research-discovery/literature-failure/v1" },
+    "provider": { "enum": ["citracer", "mosaic"] },
+    "authority": { "const": "triage_only" },
+    "source_name": { "type": ["string", "null"], "maxLength": 512 },
+    "status": { "const": "UNKNOWN" },
+    "error": {
+      "type": "object",
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      },
+      "additionalProperties": false
+    },
+    "non_claim": { "const": "No discovery candidate or truth evidence was produced." }
+  },
+  "additionalProperties": false
+}

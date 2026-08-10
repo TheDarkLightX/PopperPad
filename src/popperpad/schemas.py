@@ -22,6 +22,10 @@ SCHEMA_VERIFIER_RECEIPT_V1 = "popperpad/verifier-receipt/v1"
 SCHEMA_DISCOVERY_CANDIDATE_V1 = "research-discovery/candidate/v1"
 SCHEMA_DISCOVERY_BATCH_V1 = "research-discovery/batch/v1"
 SCHEMA_DISCOVERY_FAILURE_V1 = "research-discovery/failure/v1"
+SCHEMA_LITERATURE_CANDIDATE_V1 = "research-discovery/literature-candidate/v1"
+SCHEMA_LITERATURE_RELATION_V1 = "research-discovery/literature-relation/v1"
+SCHEMA_LITERATURE_BATCH_V1 = "research-discovery/literature-batch/v1"
+SCHEMA_LITERATURE_FAILURE_V1 = "research-discovery/literature-failure/v1"
 
 LOG_SCHEMA_V1 = "popperpad/log_record/v1"
 

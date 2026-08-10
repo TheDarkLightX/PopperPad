@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/literature-relation/v1",
+  "type": "object",
+  "required": ["schema", "provider", "authority", "relation_key", "source_work_key", "target_work_key", "relation_type", "parser_edge_type", "depth", "context", "snapshot_ref"],
+  "properties": {
+    "schema": { "const": "research-discovery/literature-relation/v1" },
+    "provider": { "const": "citracer" },
+    "authority": { "const": "triage_only" },
+    "relation_key": { "type": "string", "pattern": "^citracer:[0-9a-f]{64}$" },
+    "source_work_key": { "type": "string", "minLength": 1, "maxLength": 600 },
+    "target_work_key": { "type": "string", "minLength": 1, "maxLength": 600 },
+    "relation_type": { "const": "cites" },
+    "parser_edge_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "depth": { "type": ["integer", "null"], "minimum": 0, "maximum": 10000 },
+    "context": { "type": ["string", "null"], "maxLength": 100000 },
+    "snapshot_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

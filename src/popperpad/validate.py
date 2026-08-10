@@ -12,6 +12,13 @@ from .discovery.kurate import (
     validate_discovery_candidate,
     validate_discovery_failure,
 )
+from .discovery.literature import (
+    LiteratureAdapterError,
+    validate_literature_batch,
+    validate_literature_candidate,
+    validate_literature_failure,
+    validate_literature_relation,
+)
 from .refs import ValidationError, require, require_list, require_ref, require_str
 from .schemas import (
     SCHEMA_ARTIFACT_V1,
@@ -26,6 +33,10 @@ from .schemas import (
     SCHEMA_GAMIFICATION_QUEST_V1,
     SCHEMA_GAMIFICATION_SCORE_EVENT_V1,
     SCHEMA_HYPOTHESIS_V1,
+    SCHEMA_LITERATURE_BATCH_V1,
+    SCHEMA_LITERATURE_CANDIDATE_V1,
+    SCHEMA_LITERATURE_FAILURE_V1,
+    SCHEMA_LITERATURE_RELATION_V1,
     SCHEMA_MARKET_RESOURCE_BUDGET_V1,
     SCHEMA_MARKET_WORK_ORDER_V1,
     SCHEMA_RECIPE_V1,
@@ -620,6 +631,34 @@ def _validate_discovery_failure(obj: Mapping[str, Any]) -> None:
         raise ValidationError(str(exc)) from exc
 
 
+def _validate_literature_candidate(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_literature_candidate(obj)
+    except (LiteratureAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _validate_literature_relation(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_literature_relation(obj)
+    except (LiteratureAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _validate_literature_batch(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_literature_batch(obj)
+    except (LiteratureAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _validate_literature_failure(obj: Mapping[str, Any]) -> None:
+    try:
+        validate_literature_failure(obj)
+    except (LiteratureAdapterError, TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
 VALIDATORS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     SCHEMA_DOMAIN_V1: _validate_domain,
     SCHEMA_CONTEXT_V1: _validate_context,
@@ -638,6 +677,10 @@ VALIDATORS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     SCHEMA_DISCOVERY_CANDIDATE_V1: _validate_discovery_candidate,
     SCHEMA_DISCOVERY_BATCH_V1: _validate_discovery_batch,
     SCHEMA_DISCOVERY_FAILURE_V1: _validate_discovery_failure,
+    SCHEMA_LITERATURE_CANDIDATE_V1: _validate_literature_candidate,
+    SCHEMA_LITERATURE_RELATION_V1: _validate_literature_relation,
+    SCHEMA_LITERATURE_BATCH_V1: _validate_literature_batch,
+    SCHEMA_LITERATURE_FAILURE_V1: _validate_literature_failure,
 }
 
 

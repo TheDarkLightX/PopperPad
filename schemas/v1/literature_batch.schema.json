@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/literature-batch/v1",
+  "type": "object",
+  "required": ["schema", "provider", "authority", "snapshot_ref", "raw_export_ref", "source_name", "candidate_refs", "relation_refs", "warnings", "non_claims"],
+  "properties": {
+    "schema": { "const": "research-discovery/literature-batch/v1" },
+    "provider": { "enum": ["citracer", "mosaic"] },
+    "authority": { "const": "triage_only" },
+    "snapshot_ref": { "$ref": "#/$defs/ref" },
+    "raw_export_ref": { "$ref": "#/$defs/ref" },
+    "source_name": { "type": ["string", "null"], "maxLength": 512 },
+    "candidate_refs": { "type": "array", "maxItems": 10000, "uniqueItems": true, "items": { "$ref": "#/$defs/ref" } },
+    "relation_refs": { "type": "array", "maxItems": 100000, "uniqueItems": true, "items": { "$ref": "#/$defs/ref" } },
+    "warnings": { "type": "array", "maxItems": 1000, "items": { "type": "string", "minLength": 1, "maxLength": 10000 } },
+    "non_claims": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "Search ranking and citation parsing are discovery signals, not peer review." },
+        { "const": "No literature-import object is truth evidence or claim support." },
+        { "const": "Primary-source review and independent checks remain required." }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    }
+  },
+  "$defs": { "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } },
+  "additionalProperties": false
+}
