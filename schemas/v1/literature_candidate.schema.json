@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "research-discovery/literature-candidate/v1",
+  "type": "object",
+  "required": ["schema", "provider", "authority", "candidate_key", "work_key", "paper", "context", "provenance"],
+  "properties": {
+    "schema": { "const": "research-discovery/literature-candidate/v1" },
+    "provider": { "enum": ["citracer", "mosaic"] },
+    "authority": { "const": "triage_only" },
+    "candidate_key": { "type": "string", "pattern": "^(citracer|mosaic):[0-9a-f]{64}$" },
+    "work_key": { "type": "string", "minLength": 1, "maxLength": 600 },
+    "paper": { "$ref": "#/$defs/paper" },
+    "context": { "type": "object" },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "provider": { "const": "citracer" } } },
+      "then": { "properties": { "context": { "$ref": "#/$defs/citracerContext" } } },
+      "else": { "properties": { "context": { "$ref": "#/$defs/mosaicContext" } } }
+    }
+  ],
+  "$defs": {
+    "ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableText": { "type": ["string", "null"] },
+    "paper": {
+      "type": "object",
+      "required": ["provider_id", "title", "authors", "year", "doi", "arxiv_id", "abstract", "journal", "citation_count", "url", "source_uri"],
+      "properties": {
+        "provider_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "authors": { "type": "array", "maxItems": 1024, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "year": { "type": ["integer", "null"], "minimum": 0, "maximum": 9999 },
+        "doi": { "$ref": "#/$defs/nullableText" },
+        "arxiv_id": { "$ref": "#/$defs/nullableText" },
+        "abstract": { "$ref": "#/$defs/nullableText" },
+        "journal": { "$ref": "#/$defs/nullableText" },
+        "citation_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 2147483647 },
+        "url": { "$ref": "#/$defs/nullableText" },
+        "source_uri": { "$ref": "#/$defs/nullableText" }
+      },
+      "additionalProperties": false
+    },
+    "citracerContext": {
+      "type": "object",
+      "required": ["status", "depth", "publication_date", "keyword_hits", "is_new"],
+      "properties": {
+        "status": { "$ref": "#/$defs/nullableText" },
+        "depth": { "type": ["integer", "null"], "minimum": 0, "maximum": 10000 },
+        "publication_date": { "$ref": "#/$defs/nullableText" },
+        "keyword_hits": { "type": "array", "maxItems": 10000, "items": { "type": "string", "minLength": 1, "maxLength": 20000 } },
+        "is_new": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "mosaicContext": {
+      "type": "object",
+      "required": ["query", "source", "is_open_access", "pdf_url", "relevance_decimal"],
+      "properties": {
+        "query": { "$ref": "#/$defs/nullableText" },
+        "source": { "$ref": "#/$defs/nullableText" },
+        "is_open_access": { "type": ["boolean", "null"] },
+        "pdf_url": { "$ref": "#/$defs/nullableText" },
+        "relevance_decimal": { "type": ["string", "null"], "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$" }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["snapshot_ref", "record_ref", "input_format", "retrieval_policy_kind"],
+      "properties": {
+        "snapshot_ref": { "$ref": "#/$defs/ref" },
+        "record_ref": { "$ref": "#/$defs/ref" },
+        "input_format": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "retrieval_policy_kind": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

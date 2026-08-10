@@ -16,6 +16,17 @@ from .discovery.kurate import (
     build_failure_object,
     fetch_kurate_candidates,
 )
+from .discovery.literature import (
+    MAX_EXPORT_BYTES,
+    LiteratureAdapterError,
+    normalize_literature_export,
+)
+from .discovery.literature import (
+    build_batch_object as build_literature_batch_object,
+)
+from .discovery.literature import (
+    build_failure_object as build_literature_failure_object,
+)
 from .gamification import aggregate_score_events
 from .pad import PopperPad
 from .schemas import SCHEMA_GAMIFICATION_SCORE_EVENT_V1
@@ -247,6 +258,92 @@ def _cmd_kurate_discover(pad: PopperPad, ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_literature_import(pad: PopperPad, ns: argparse.Namespace) -> int:
+    source = str(ns.input)
+    source_name = "stdin.json" if source == "-" else Path(source).name
+    try:
+        if source == "-":
+            raw = sys.stdin.buffer.read(MAX_EXPORT_BYTES + 1)
+        else:
+            source_path = Path(source)
+            try:
+                if source_path.stat().st_size > MAX_EXPORT_BYTES:
+                    raise LiteratureAdapterError("EXPORT_TOO_LARGE", "export exceeds 32 MiB")
+                raw = source_path.read_bytes()
+            except OSError as exc:
+                raise LiteratureAdapterError(
+                    "READ_FAILED",
+                    f"{type(exc).__name__}: unable to read input export",
+                ) from exc
+        batch = normalize_literature_export(
+            raw,
+            provider=str(ns.provider),
+            source_path=source_name,
+        )
+    except LiteratureAdapterError as exc:
+        failure = build_literature_failure_object(
+            provider=str(ns.provider),
+            source_name=source_name,
+            code=exc.code,
+            detail=exc.detail,
+        )
+        committed = pad.commit_values(
+            objects=(failure,),
+            policy_version="popperpad-literature-import-policy/v1",
+        )
+        _print(
+            {
+                "ok": False,
+                "provider": str(ns.provider),
+                "authority": "triage_only",
+                "status": "UNKNOWN",
+                "failure_ref": committed.object_refs[0],
+                "commit_root": committed.commit_root,
+                "error": {"code": exc.code, "detail": exc.detail},
+            }
+        )
+        return 2
+
+    candidate_refs = tuple(
+        sha256_bytes(canonical_json_bytes(candidate)) for candidate in batch.candidates
+    )
+    relation_refs = tuple(
+        sha256_bytes(canonical_json_bytes(relation)) for relation in batch.relations
+    )
+    batch_object = build_literature_batch_object(
+        batch,
+        candidate_refs=candidate_refs,
+        relation_refs=relation_refs,
+    )
+    committed = pad.commit_values(
+        objects=tuple(batch.candidates) + tuple(batch.relations) + (batch_object,),
+        blobs=((batch.raw_export, "application/json"),),
+        policy_version="popperpad-literature-import-policy/v1",
+    )
+    candidate_end = len(candidate_refs)
+    relation_end = candidate_end + len(relation_refs)
+    if committed.object_refs[:candidate_end] != candidate_refs:
+        raise RuntimeError("committed literature candidate refs differ from the validated plan")
+    if committed.object_refs[candidate_end:relation_end] != relation_refs:
+        raise RuntimeError("committed literature relation refs differ from the validated plan")
+    if committed.blob_refs != (batch.raw_export_ref,):
+        raise RuntimeError("committed literature export ref differs from the validated snapshot")
+    _print(
+        {
+            "ok": True,
+            "provider": batch.provider,
+            "authority": "triage_only",
+            "candidate_refs": list(candidate_refs),
+            "relation_refs": list(relation_refs),
+            "batch_ref": committed.object_refs[-1],
+            "raw_export_ref": committed.blob_refs[0],
+            "warnings": list(batch.warnings),
+            "commit_root": committed.commit_root,
+        }
+    )
+    return 0
+
+
 def _configure_init(p: argparse.ArgumentParser) -> None:
     pass
 
@@ -318,6 +415,11 @@ def _configure_kurate_discover(p: argparse.ArgumentParser) -> None:
     p.add_argument("--timeout-seconds", type=int, default=20)
 
 
+def _configure_literature_import(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--provider", choices=("citracer", "mosaic"), required=True)
+    p.add_argument("--input", required=True, help="Provider JSON export path, or '-' for stdin")
+
+
 def _cmd_dashboard(pad: PopperPad, ns: argparse.Namespace) -> int:
     print_dashboard(str(ns.pad))
     return 0
@@ -354,6 +456,12 @@ COMMANDS: list[Command] = [
         "Import bounded Kurate paper assessments as triage-only candidates",
         _configure_kurate_discover,
         _cmd_kurate_discover,
+    ),
+    Command(
+        "literature-import",
+        "Import citracer or MOSAIC JSON as triage-only literature data",
+        _configure_literature_import,
+        _cmd_literature_import,
     ),
     Command("dashboard", "Print a rich dashboard summary", _configure_dashboard, _cmd_dashboard),
     Command("tui", "Launch the interactive textual TUI", _configure_tui, _cmd_tui),

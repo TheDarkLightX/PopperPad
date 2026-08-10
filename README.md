@@ -166,6 +166,24 @@ failure or upstream schema drift records an `UNKNOWN` discovery-failure object
 instead of silently producing candidates. See
 [the Kurate adapter boundary](docs/kurate-discovery-adapter.md).
 
+Import a reproducible citracer graph or MOSAIC search envelope:
+
+```bash
+popperpad literature-import --pad ./pad --provider citracer --input trace.json
+popperpad literature-import --pad ./pad --provider mosaic --input search.json
+```
+
+These imports use separate literature-candidate, relation, batch, and failure
+schemas. They preserve the exact input bytes and MOSAIC partial-source errors,
+but remain outside the hypothesis and truth-evidence authority path. See
+[the literature import boundary](docs/literature-import-adapter.md).
+
+Fleet coordinators can call `popperpad-literature-importer` instead. It binds
+the exact frozen export hash to a
+`codex-fleet-literature-import-receipt/v1` file and returns the PopperPad
+commit, batch, blob, candidate, and relation references. The receipt remains
+`triage_only`.
+
 Blobs (large artifacts):
 
 ```bash
