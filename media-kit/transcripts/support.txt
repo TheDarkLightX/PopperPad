@@ -1,0 +1,27 @@
+popperpad % popperpad --pad ./pad status sha256:4988084502d04ca288c31d3413b22ef4000d62ac97f63080221574cc1278b19b --context sha256:268a04ff7af0f83c51a01f096de9abfdc3181e74750e4f356aff186eb6773160
+{
+  "ok": true,
+  "refutes": [],
+  "state": "unknown",
+  "supports": []
+}
+popperpad % popperpad --pad ./pad prove sha256:4988084502d04ca288c31d3413b22ef4000d62ac97f63080221574cc1278b19b --context sha256:268a04ff7af0f83c51a01f096de9abfdc3181e74750e4f356aff186eb6773160
+{
+  "edge_refs": [
+    "sha256:4212da2747ae8817b93a58f757bc37449c8c2bc19bf37a33622ee2128a6f11e1"
+  ],
+  "evidence_refs": [
+    "sha256:49f0e6508035b3e8ccfd1a1698a302210da698d6d6fffe75db46005537477375"
+  ],
+  "ok": true,
+  "verdict": "PASS"
+}
+popperpad % popperpad --pad ./pad status sha256:4988084502d04ca288c31d3413b22ef4000d62ac97f63080221574cc1278b19b --context sha256:268a04ff7af0f83c51a01f096de9abfdc3181e74750e4f356aff186eb6773160
+{
+  "ok": true,
+  "refutes": [],
+  "state": "supported",
+  "supports": [
+    "sha256:4212da2747ae8817b93a58f757bc37449c8c2bc19bf37a33622ee2128a6f11e1"
+  ]
+}

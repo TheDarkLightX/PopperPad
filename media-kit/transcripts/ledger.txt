@@ -1,0 +1,35 @@
+popperpad % popperpad --pad ./pad init
+{
+  "ok": true,
+  "pad": "/private/tmp/popperpad-media-kit/ledger/pad"
+}
+popperpad % popperpad --pad ./pad add --json ./objects/domain.json
+{
+  "obj_ref": "sha256:0c5aec58a3ecb5a611c863f20a92556f6f655572c2617d203fb07f11bb51e2c7",
+  "ok": true,
+  "record_hash": "sha256:a811ec82e78e67b987282d6b77ffe0b1959f197dc9808854a6686c3655b190f0"
+}
+popperpad % popperpad --pad ./pad add --json ./objects/support-recipe.json
+{
+  "obj_ref": "sha256:8f8560c9f971af9f322b9148567f887add604aac40bd7923276198bc7a593480",
+  "ok": true,
+  "record_hash": "sha256:864b5548c8166268c0f2dcb74b4437139c5474b9a2b34990620278fe342709c1"
+}
+popperpad % popperpad --pad ./pad add --json ./objects/hypothesis.json
+{
+  "obj_ref": "sha256:04513a41e8ac8efa3638bda649e7725e93226ef2b958f5e93c62b3414cfc14e7",
+  "ok": true,
+  "record_hash": "sha256:4539516354805cb9c135fd9fd465030a133b70f6b4633797f00d2db8b99d68e1"
+}
+popperpad % popperpad --pad ./pad query --schema popperpad/hypothesis/v1 --limit 5
+{
+  "objects": [
+    {
+      "hypothesis_id": "sensor-drift-bound",
+      "ref": "sha256:04513a41e8ac8efa3638bda649e7725e93226ef2b958f5e93c62b3414cfc14e7",
+      "schema": "popperpad/hypothesis/v1",
+      "title": "Sensor drift remains within \u00b10.5 \u00b0C"
+    }
+  ],
+  "ok": true
+}
