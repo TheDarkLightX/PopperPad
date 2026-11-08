@@ -200,3 +200,11 @@ popperpad transfer-paths --pad ./pad --from <domain_ref> --to <domain_ref> --max
 ## Schemas
 
 JSON Schemas live under `schemas/v1/` (no runtime dependency on `jsonschema`).
+
+## License
+
+PopperPad's original source code, schemas, and documentation are available under the [MIT License](LICENSE). Commercial and noncommercial use are both permitted under its terms.
+
+Third-party dependencies, imported datasets, evidence bundles, and user-contributed research records retain their own copyrights and license terms. This repository license does not override those rights.
+
+The MIT license does not require purchasing tokens or credits. Optional payments, bounties, storage, indexing, and verification services are independent of the right to use and modify the open-source code. Economic incentives must not determine scientific validity; the evidence and verifier checks do that.
