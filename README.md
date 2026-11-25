@@ -148,6 +148,21 @@ popperpad checkpoint --pad ./pad
 popperpad --pad ./pad gamification-leaderboard --point-kind xp
 ```
 
+Explain a status and plan the next checks (read-only; nothing is run or recorded):
+
+```bash
+popperpad provenance  --pad ./pad <hypothesis_ref> --context <context_ref>
+popperpad plan-checks --pad ./pad <hypothesis_ref>... --context <context_ref> --regret-budget 1
+```
+
+`provenance` lists each reason the status counts (an edge with one admitting evidence
+record) and, for each of edge, evidence, recipe and source, the least number of items whose
+removal would change the status. A count of one is a single point of failure: for example,
+two passing runs of the same recipe still rest on one verification method. `plan-checks`
+treats each unknown hypothesis as true in some worlds and false in others, and picks the
+check whose worst-case extra cost over every world's best plan is least. See
+[provenance and check planning](docs/architecture/provenance-and-check-planning.md).
+
 Discover papers for later review through the bounded Kurate adapter:
 
 ```bash

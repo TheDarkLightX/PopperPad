@@ -224,10 +224,35 @@ def _truth_edge_admissible(
     evidence_by_ref: dict[str, EvidenceRecord],
     recipes_by_ref: dict[str, RecipeRecord],
 ) -> bool:
+    return bool(
+        admitting_evidence(
+            edge,
+            hypothesis_ref=hypothesis_ref,
+            accepted_recipe_refs=accepted_recipe_refs,
+            evidence_by_ref=evidence_by_ref,
+            recipes_by_ref=recipes_by_ref,
+        )
+    )
+
+
+def admitting_evidence(
+    edge: TruthEdge,
+    *,
+    hypothesis_ref: str,
+    accepted_recipe_refs: frozenset[str],
+    evidence_by_ref: dict[str, EvidenceRecord],
+    recipes_by_ref: dict[str, RecipeRecord],
+) -> tuple[EvidenceRecord, ...]:
+    """Every evidence record that makes @p edge count toward the hypothesis's status.
+
+    An edge counts when at least one of these exists. Each is a separate reason, which is
+    what ``core.provenance`` counts. Duplicated references are reported once.
+    """
     expected_verdict = {"supports": "support", "refutes": "refute"}.get(edge.kind)
     if expected_verdict is None:
-        return False
-    for evidence_ref in edge.evidence_refs:
+        return ()
+    admitted: list[EvidenceRecord] = []
+    for evidence_ref in sorted(set(edge.evidence_refs)):
         evidence = evidence_by_ref.get(evidence_ref)
         if evidence is None:
             continue
@@ -242,8 +267,19 @@ def _truth_edge_admissible(
         recipe = recipes_by_ref.get(evidence.recipe_ref)
         if recipe is None or recipe.verdict_on_pass != expected_verdict:
             continue
-        return True
-    return False
+        admitted.append(evidence)
+    return tuple(admitted)
+
+
+def classify_state(has_supports: bool, has_refutes: bool) -> str:
+    """The derived state from whether any support and any refutation counts."""
+    if has_supports and has_refutes:
+        return "disputed"
+    if has_refutes:
+        return "falsified"
+    if has_supports:
+        return "supported"
+    return "unknown"
 
 
 def _classify(supports: list[str], refutes: list[str]) -> str:

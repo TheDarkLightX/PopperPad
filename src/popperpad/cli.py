@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .core.codec import canonical_json_bytes, sha256_bytes
+from .core.result import Reject
 from .discovery.kurate import (
     DISCOVERY_AUTHORITY,
     KURATE_PROVIDER,
@@ -116,6 +117,69 @@ def _cmd_refute(pad: PopperPad, ns: argparse.Namespace) -> int:
 def _cmd_status(pad: PopperPad, ns: argparse.Namespace) -> int:
     rep = pad.status(str(ns.hypothesis_ref), context_ref=ns.context)
     _print({"ok": True, "state": rep.state, "supports": rep.supports, "refutes": rep.refutes})
+    return 0
+
+
+def _cmd_provenance(pad: PopperPad, ns: argparse.Namespace) -> int:
+    rep = pad.provenance(str(ns.hypothesis_ref), context_ref=ns.context)
+
+    def side(value: Any) -> dict[str, Any]:
+        return {
+            "derivations": [
+                {"edge_ref": d.edge_ref, "evidence_ref": d.evidence_ref, "recipe_ref": d.recipe_ref,
+                 "source_ref": d.source_ref}
+                for d in value.derivations
+            ],
+            "cuts": {c.kind: {"size": c.size, "items": list(c.items), "single_point_of_failure": c.size == 1}
+                     for c in value.cuts},
+        }
+
+    _print({
+        "ok": True,
+        "state": rep.state,
+        "supports": side(rep.supports),
+        "refutes": side(rep.refutes),
+        "smallest_change": rep.smallest_change,
+        "changes": [{"side": c.side, "remove": c.kind, "items": list(c.items), "to_state": c.to_state}
+                    for c in rep.changes],
+    })
+    return 0
+
+
+def _cmd_plan_checks(pad: PopperPad, ns: argparse.Namespace) -> int:
+    costs: dict[str, int] = {}
+    for item in ns.cost or ():
+        ref, sep, amount = str(item).partition("=")
+        if not sep or not amount.isdigit():
+            raise SystemExit("--cost expects RECIPE_REF=INTEGER")
+        costs[ref] = int(amount)
+    pending, plan = pad.plan_checks([str(h) for h in ns.hypothesis_refs], context_ref=ns.context,
+                                    pending_cost=int(ns.pending_cost), regret_budget=int(ns.regret_budget),
+                                    costs=costs)
+    if plan is None:
+        _print({"ok": True, "pending": [], "run_now": [], "note": "no hypothesis is pending"})
+        return 0
+    if isinstance(plan, Reject):
+        _print({"ok": False, "pending": list(pending), "reject": plan.code})
+        return 1
+
+    def listed(checks: Any) -> list[dict[str, Any]]:
+        return [{"hypothesis_ref": c.hypothesis_ref, "recipe_ref": c.recipe_ref,
+                 "verdict_on_pass": c.verdict_on_pass, "cost": c.cost} for c in checks]
+
+    _print({
+        "ok": True,
+        "pending": list(pending),
+        "worlds": plan.worlds,
+        "first_check": None if plan.first_check is None else listed((plan.first_check,))[0],
+        "first_check_regret": plan.first_check_regret,
+        "run_now": listed(plan.run_now),
+        "tied_prefixes": plan.tied_prefixes,
+        "one_plan_optimal_in_every_world": plan.one_plan_optimal_in_every_world,
+        "common_plan": None if plan.common_plan is None else listed(plan.common_plan),
+        "within_budget": {"regret_budget": int(ns.regret_budget), "checks": listed(plan.within_budget),
+                          "regret_per_world": list(plan.within_budget_regret)},
+    })
     return 0
 
 
@@ -377,6 +441,19 @@ def _configure_status(p: argparse.ArgumentParser) -> None:
     p.add_argument("--context", default=None, help="Optional context ref (sha256:<64hex>)")
 
 
+def _configure_provenance(p: argparse.ArgumentParser) -> None:
+    p.add_argument("hypothesis_ref", help="Hypothesis ref (sha256:<64hex>)")
+    p.add_argument("--context", default=None, help="Optional context ref (sha256:<64hex>)")
+
+
+def _configure_plan_checks(p: argparse.ArgumentParser) -> None:
+    p.add_argument("hypothesis_refs", nargs="+", help="Hypothesis refs (sha256:<64hex>); unknown ones are planned")
+    p.add_argument("--context", default=None, help="Optional context ref (sha256:<64hex>)")
+    p.add_argument("--pending-cost", type=int, default=3, help="Cost of each hypothesis left unsettled")
+    p.add_argument("--regret-budget", type=int, default=1, help="Extra cost allowed in each world")
+    p.add_argument("--cost", action="append", help="RECIPE_REF=INTEGER, overriding the recipe's time budget")
+
+
 def _configure_doctor(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-strict", action="store_true", help="Exit 0 even if issues are found")
 
@@ -446,6 +523,18 @@ COMMANDS: list[Command] = [
     Command("prove", "Run support recipes for a hypothesis (emit evidence + supports edges)", _configure_prove, _cmd_prove),
     Command("refute", "Run refuter recipes for a hypothesis (emit evidence + refutes edges)", _configure_refute, _cmd_refute),
     Command("status", "Compute derived status for a hypothesis", _configure_status, _cmd_status),
+    Command(
+        "provenance",
+        "Count a status's derivations and show its single points of failure",
+        _configure_provenance,
+        _cmd_provenance,
+    ),
+    Command(
+        "plan-checks",
+        "Choose the checks to run next so the plan stays good in every world",
+        _configure_plan_checks,
+        _cmd_plan_checks,
+    ),
     Command("doctor", "Consistency checks (hash chain + object validation)", _configure_doctor, _cmd_doctor),
     Command("checkpoint", "Write a checkpoint object (log head + event count)", _configure_checkpoint, _cmd_checkpoint),
     Command("query", "List objects by schema (best-effort, scans log)", _configure_query, _cmd_query),

@@ -12,7 +12,9 @@ from .core.result import Reject
 from .core.values import thaw_json
 from .doctor import Doctor, DoctorReport
 from .engine import CheckEngine, RunResult
-from .graph import StatusResult, compute_status, find_transfer_paths, iter_objects_by_schema
+from .core.experiment_plan import CandidateCheck, ExperimentPlan, ExperimentRequest, plan_experiments
+from .core.provenance import ProvenanceResult
+from .graph import StatusResult, compute_provenance, compute_status, find_transfer_paths, iter_objects_by_schema
 from .index import PadIndex
 from .log import AppendOnlyLog, utc_now_iso
 from .refs import ValidationError, is_ref, require
@@ -219,6 +221,52 @@ class PopperPad:
         return self._engine.run_hypothesis(hyp_ref, context_ref=context_ref, mode=mode)
 
     def status(self, hyp_ref: str, *, context_ref: str | None) -> StatusResult:
+        return compute_status(**self._status_inputs(hyp_ref, context_ref))
+
+    def provenance(self, hyp_ref: str, *, context_ref: str | None) -> ProvenanceResult:
+        """Every derivation of the hypothesis's status, its cuts, and the removals that change it."""
+        return compute_provenance(**self._status_inputs(hyp_ref, context_ref))
+
+    def plan_checks(
+        self,
+        hyp_refs: Iterable[str],
+        *,
+        context_ref: str | None,
+        pending_cost: int = 3,
+        regret_budget: int = 1,
+        costs: Mapping[str, int] | None = None,
+    ) -> tuple[tuple[str, ...], ExperimentPlan | Reject | None]:
+        """Plan the next checks for the hypotheses whose status is still unknown.
+
+        A check is one accepted recipe of one pending hypothesis. Its cost is ``costs[recipe]``
+        when given, else the recipe's time budget in whole seconds, at least 1. Returns the
+        pending hypotheses and the plan, or ``None`` when none is pending. Nothing is run.
+        """
+        pending, checks = [], []
+        for hyp_ref in hyp_refs:
+            inputs = self._status_inputs(hyp_ref, context_ref)
+            if compute_status(**inputs).state != "unknown":
+                continue
+            pending.append(hyp_ref)
+            for recipe_ref in sorted(inputs["accepted_recipe_refs"]):
+                recipe = self.get_object(recipe_ref)
+                if not isinstance(recipe, Mapping):
+                    continue
+                if recipe.get("verdict_on_pass", "support") == "neutral":
+                    continue
+                timeout_ms = recipe.get("timeout_ms", 30_000)
+                budget_s = -(-timeout_ms // 1000) if type(timeout_ms) is int and timeout_ms > 0 else 30
+                cost = (costs or {}).get(recipe_ref, max(1, budget_s))
+                checks.append(CandidateCheck(hypothesis_ref=hyp_ref, recipe_ref=recipe_ref,
+                                             verdict_on_pass=str(recipe.get("verdict_on_pass", "support")),
+                                             cost=cost))
+        if not pending:
+            return (), None
+        request = ExperimentRequest(hypotheses=tuple(pending), checks=tuple(checks),
+                                    pending_cost=pending_cost, regret_budget=regret_budget)
+        return tuple(pending), plan_experiments(request)
+
+    def _status_inputs(self, hyp_ref: str, context_ref: str | None) -> dict[str, Any]:
         hypothesis = self.get_object(hyp_ref)
         require(
             isinstance(hypothesis, Mapping) and hypothesis.get("schema") == SCHEMA_HYPOTHESIS_V1,
@@ -230,14 +278,8 @@ class PopperPad:
         self._ensure_index()
         edge_refs = self._index.edges_by_target(hyp_ref, object_lookup=self.get_object)
         edges = [(ref, self.get_object(ref)) for ref in edge_refs]
-        objects = self._load_status_objects(edges)
-        return compute_status(
-            edges,
-            hyp_ref=hyp_ref,
-            context_ref=context_ref,
-            objects=objects,
-            accepted_recipe_refs=accepted_recipe_refs,
-        )
+        return {"edges": edges, "hyp_ref": hyp_ref, "context_ref": context_ref,
+                "objects": self._load_status_objects(edges), "accepted_recipe_refs": accepted_recipe_refs}
 
     def _load_status_objects(
         self, edges: Iterable[tuple[str, Mapping[str, Any]]]

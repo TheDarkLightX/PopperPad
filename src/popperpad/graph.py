@@ -14,6 +14,7 @@ from .core.graph import (
     derive_status,
     find_transfer_paths as find_transfer_paths_core,
 )
+from .core.provenance import ProvenanceResult, derive_provenance
 from .refs import is_ref, require
 from .schemas import SCHEMA_EDGE_V1, SCHEMA_EVIDENCE_V1, SCHEMA_RECIPE_V1
 
@@ -91,6 +92,38 @@ def compute_status(
 ) -> StatusResult:
     """Shell adapter: load one immutable snapshot, then call pure graph semantics."""
 
+    return derive_status(
+        status_snapshot(edges, hyp_ref=hyp_ref, context_ref=context_ref, objects=objects,
+                        accepted_recipe_refs=accepted_recipe_refs)
+    )
+
+
+def compute_provenance(
+    edges: Iterable[tuple[str, Mapping[str, Any]]],
+    *,
+    hyp_ref: str,
+    context_ref: str | None,
+    objects: StatusObjects,
+    accepted_recipe_refs: AbstractSet[str],
+) -> ProvenanceResult:
+    """Shell adapter: the same snapshot as ``compute_status``, with every derivation kept."""
+
+    return derive_provenance(
+        status_snapshot(edges, hyp_ref=hyp_ref, context_ref=context_ref, objects=objects,
+                        accepted_recipe_refs=accepted_recipe_refs)
+    )
+
+
+def status_snapshot(
+    edges: Iterable[tuple[str, Mapping[str, Any]]],
+    *,
+    hyp_ref: str,
+    context_ref: str | None,
+    objects: StatusObjects,
+    accepted_recipe_refs: AbstractSet[str],
+) -> StatusSnapshot:
+    """Parse one complete immutable status snapshot from shell objects."""
+
     require(is_ref(hyp_ref), "invalid hypothesis ref")
     if context_ref is not None:
         require(is_ref(context_ref), "invalid context ref")
@@ -120,15 +153,13 @@ def compute_status(
             if parsed is not None:
                 recipes.append(parsed)
 
-    return derive_status(
-        StatusSnapshot(
-            hypothesis_ref=hyp_ref,
-            context_ref=context_ref,
-            accepted_recipe_refs=frozenset(str(ref) for ref in accepted_recipe_refs),
-            edges=tuple(parsed_edges),
-            evidence=tuple(evidence),
-            recipes=tuple(recipes),
-        )
+    return StatusSnapshot(
+        hypothesis_ref=hyp_ref,
+        context_ref=context_ref,
+        accepted_recipe_refs=frozenset(str(ref) for ref in accepted_recipe_refs),
+        edges=tuple(parsed_edges),
+        evidence=tuple(evidence),
+        recipes=tuple(recipes),
     )
 
 
