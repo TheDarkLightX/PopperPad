@@ -118,3 +118,25 @@ def test_cli_provenance_and_plan_checks(capsys: pytest.CaptureFixture[str]) -> N
         assert out["state"] == "unknown" and out["changes"] == []
         with pytest.raises(SystemExit):
             main(["--pad", str(root), "plan-checks", hyp, "--cost", "not-a-pair"])
+
+
+@pytest.mark.parametrize("neutral_only", [False, True])
+def test_pad_skips_neutral_recipes(tmp_path: Path, neutral_only: bool) -> None:
+    from popperpad.schemas import SCHEMA_RECIPE_V1
+
+    pad, hyp, support, refute = _pad_with_hypothesis(tmp_path / "pad")
+    neutral = pad.put_object({"schema": SCHEMA_RECIPE_V1, "recipe_id": "diagnostic",
+                              "verdict_on_pass": "neutral", "argv": ["unused"],
+                              "timeout_ms": 1000, "expect": {"exit_code": 0}}).obj_ref
+    obj = dict(pad.get_object(hyp))
+    obj["check_recipe_refs"] = [neutral] if neutral_only else [support, neutral, refute]
+    hyp = pad.put_object(obj).obj_ref
+    pending, plan = pad.plan_checks([hyp], context_ref=None, pending_cost=10)
+    assert pending == (hyp,)
+    if neutral_only:
+        assert isinstance(plan, Reject)
+        assert plan.code == "EXPERIMENT_CHECKS_OUT_OF_BOUNDS"
+    else:
+        assert plan.first_check.recipe_ref == refute
+        assert all(c.recipe_ref != neutral for c in (*plan.run_now, *plan.within_budget))
+    assert pad.status(hyp, context_ref=None).state == "unknown"

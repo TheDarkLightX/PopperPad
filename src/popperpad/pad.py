@@ -252,6 +252,8 @@ class PopperPad:
                 recipe = self.get_object(recipe_ref)
                 if not isinstance(recipe, Mapping):
                     continue
+                if recipe.get("verdict_on_pass", "support") == "neutral":
+                    continue
                 timeout_ms = recipe.get("timeout_ms", 30_000)
                 budget_s = -(-timeout_ms // 1000) if type(timeout_ms) is int and timeout_ms > 0 else 30
                 cost = (costs or {}).get(recipe_ref, max(1, budget_s))
