@@ -13,3 +13,5 @@ rust/popperpad-core/target/
 
 # Local pads (default CLI)
 popperpad_data/
+tools/zeno_adp_vectors/target/
+tools/zeno_adp_vectors/Cargo.lock
